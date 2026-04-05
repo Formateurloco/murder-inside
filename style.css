@@ -1,0 +1,757 @@
+@import url('https://fonts.googleapis.com/css2?family=Special+Elite&family=Share+Tech+Mono&family=Bebas+Neue&family=Inter:wght@400;600;800;900&display=swap');
+
+/* ── Palette Cyberpunk Noir ── */
+:root {
+  --bg:          #0a0908;
+  --bg2:         #111009;
+  --panel:       #161410;
+  --panel2:      #1c1a14;
+  --line:        #2e2b22;
+  --line-soft:   #231f18;
+
+  --text:        #e8e2d4;
+  --muted:       #7a7260;
+  --faded:       #3d3829;
+
+  --blood:       #c0182e;
+  --blood-soft:  #8c1020;
+  --blood-glow:  rgba(192,24,46,.18);
+
+  --gold:        #c8952a;
+  --gold-soft:   rgba(200,149,42,.14);
+  --gold-line:   rgba(200,149,42,.32);
+
+  --ink:         #1a1814;
+  --paper:       #e8e2d4;
+  --paper-dim:   rgba(232,226,212,.06);
+
+  --cyan:        #3fbfbf;
+  --cyan-soft:   rgba(63,191,191,.12);
+  --cyan-line:   rgba(63,191,191,.28);
+
+  --green:       #4a9e6a;
+  --warn:        #c8952a;
+  --red:         #c0182e;
+}
+
+/* ── Reset & base ── */
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background-color: var(--bg);
+  background-image:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='4' height='4'%3E%3Crect width='4' height='4' fill='%230a0908'/%3E%3Crect x='0' y='0' width='1' height='1' fill='%23141210' opacity='.6'/%3E%3C/svg%3E");
+  color: var(--text);
+  font-family: 'Inter', system-ui, Arial, sans-serif;
+  min-height: 100vh;
+}
+
+/* ── Fond binaire matrix ── */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  background: url("images/fond.png") center / cover;
+  opacity: .045;
+  pointer-events: none;
+  z-index: 0;
+}
+#app { position: relative; z-index: 1; }
+#screenFlash, #bloodOverlay { z-index: 9999; }
+
+/* ── Layout ── */
+.wrap    { max-width: 1380px; margin: 0 auto; padding: 22px; }
+.grid    { display: grid; gap: 14px; }
+.g2      { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.g3      { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.g4      { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.row     { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.between { display: flex; justify-content: space-between; gap: 10px; align-items: center; flex-wrap: wrap; }
+.screen-grid { display: grid; grid-template-columns: 1.1fr .9fr; gap: 14px; }
+.hero-grid   { display: grid; grid-template-columns: 1.25fr .75fr; gap: 16px; }
+
+/* ── Cards ── */
+.card {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 18px;
+  box-shadow: 0 2px 0 rgba(0,0,0,.8), 0 8px 32px rgba(0,0,0,.5);
+  position: relative;
+}
+/* coin découpé style dossier */
+.card::before {
+  content: "";
+  position: absolute;
+  top: 0; right: 0;
+  width: 14px; height: 14px;
+  background: var(--bg);
+  clip-path: polygon(0 0, 100% 0, 100% 100%);
+}
+
+.note {
+  padding: 12px 14px;
+  border-radius: 2px;
+  background: var(--bg2);
+  border-left: 2px solid var(--gold);
+  border-top: 1px solid var(--line);
+  border-right: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+}
+
+.pill {
+  background: var(--bg2);
+  border: 1px solid var(--line);
+  padding: 9px 12px;
+  border-radius: 2px;
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.section-card {
+  background: var(--panel2);
+  border: 1px solid var(--line);
+  border-radius: 2px;
+  padding: 14px;
+}
+
+.quest-frame {
+  border: 1px solid var(--gold-line);
+  background: var(--gold-soft);
+  border-radius: 2px;
+  padding: 12px;
+}
+
+.target-frame {
+  border: 1px solid rgba(192,24,46,.3);
+  background: rgba(192,24,46,.05);
+  border-radius: 2px;
+  padding: 12px;
+}
+
+.story-box {
+  padding: 14px;
+  border-radius: 2px;
+  border: 1px solid var(--gold-line);
+  background: var(--gold-soft);
+}
+
+/* ── Buttons ── */
+.btn {
+  border: 1px solid var(--line);
+  border-radius: 2px;
+  padding: 10px 18px;
+  font-family: 'Share Tech Mono', monospace;
+  font-weight: 700;
+  font-size: 13px;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  cursor: pointer;
+  background: var(--panel2);
+  color: var(--text);
+  transition: background .12s, border-color .12s, transform .1s;
+  box-shadow: 0 2px 0 rgba(0,0,0,.6);
+}
+.btn:hover    { background: var(--panel); border-color: var(--gold); color: var(--gold); transform: translateY(-1px); }
+.btn:disabled { opacity: .35; cursor: not-allowed; transform: none; }
+
+.btn.cyan  {
+  background: var(--cyan);
+  border-color: var(--cyan);
+  color: var(--ink);
+  box-shadow: 0 2px 0 rgba(0,0,0,.6), 0 0 12px rgba(63,191,191,.25);
+}
+.btn.cyan:hover { background: #4fd0d0; border-color: #4fd0d0; color: var(--ink); }
+
+.btn.pink  {
+  background: var(--blood);
+  border-color: var(--blood);
+  color: #fff;
+  box-shadow: 0 2px 0 rgba(0,0,0,.6), 0 0 12px var(--blood-glow);
+}
+.btn.pink:hover { background: #d41e34; border-color: #d41e34; color: #fff; }
+
+.btn.green {
+  background: var(--green);
+  border-color: var(--green);
+  color: #fff;
+  box-shadow: 0 2px 0 rgba(0,0,0,.6);
+}
+.btn.green:hover { background: #5cb87c; border-color: #5cb87c; color: #fff; }
+
+.btn.outline {
+  background: transparent;
+  border-color: var(--line);
+  color: var(--muted);
+}
+.btn.outline:hover { border-color: var(--gold); color: var(--gold); background: transparent; }
+
+/* ── Inputs ── */
+.input, .select {
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: 2px;
+  border: 1px solid var(--line);
+  background: var(--bg2);
+  color: var(--text);
+  font-family: 'Share Tech Mono', monospace;
+  font-size: 13px;
+}
+.input:focus, .select:focus {
+  outline: none;
+  border-color: var(--gold);
+}
+
+/* ── Badges & chips ── */
+.badge {
+  display: inline-flex;
+  border: 1px solid var(--line);
+  border-radius: 2px;
+  padding: 4px 8px;
+  font-family: 'Share Tech Mono', monospace;
+  font-size: 11px;
+  color: var(--muted);
+  letter-spacing: .04em;
+}
+
+.badge-rare {
+  display: inline-flex;
+  padding: 4px 8px;
+  border-radius: 2px;
+  background: rgba(200,149,42,.12);
+  border: 1px solid var(--gold-line);
+  font-family: 'Share Tech Mono', monospace;
+  font-size: 11px;
+  color: var(--gold);
+  letter-spacing: .04em;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  border-radius: 2px;
+  border: 1px solid var(--cyan-line);
+  background: var(--cyan-soft);
+  color: var(--cyan);
+  font-family: 'Share Tech Mono', monospace;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+
+/* ── Typography ── */
+.mini        { font-size: 12px; color: var(--muted); }
+.warn        { color: var(--warn); }
+
+.label-top {
+  font-family: 'Share Tech Mono', monospace;
+  font-size: 10px;
+  letter-spacing: .18em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-bottom: 2px;
+}
+
+.section-title { font-size: 18px; font-weight: 800; }
+.big           { font-size: 70px; font-weight: 900; text-align: center; }
+h1, h2, h3, p  { margin: 0; }
+h2 { font-family: 'Bebas Neue', 'Inter', sans-serif; letter-spacing: .06em; font-size: 28px; }
+h3 { font-weight: 800; }
+
+/* ── Hero ── */
+.hero-title {
+  font-family: 'Bebas Neue', 'Inter', sans-serif;
+  font-size: 64px;
+  line-height: .92;
+  letter-spacing: .04em;
+  color: var(--text);
+}
+.hero-sub { font-size: 15px; line-height: 1.6; color: var(--muted); }
+
+/* ── Soft list ── */
+.soft-list { display: grid; gap: 8px; margin-top: 12px; }
+.soft-item {
+  padding: 11px 14px;
+  border-radius: 2px;
+  background: var(--bg2);
+  border-left: 2px solid var(--line);
+  border-top: 1px solid var(--line);
+  border-right: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+.soft-item strong { color: var(--text); }
+
+/* ── Player card ── */
+.identity-card { position: relative; overflow: hidden; }
+.identity-card::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(135deg, rgba(200,149,42,.04), transparent 40%, rgba(192,24,46,.04));
+  pointer-events: none;
+}
+/* tache de sang décorative coin bas-droit */
+.identity-card::before {
+  content: "";
+  position: absolute;
+  bottom: -10px; right: -10px;
+  width: 120px; height: 120px;
+  background: url("images/sang.png") center / contain no-repeat;
+  opacity: .13;
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* ── Avatar de profil ── */
+.player-avatar {
+  width: 64px;
+  height: 64px;
+  border-radius: 2px;
+  object-fit: cover;
+  border: 1px solid var(--line);
+  flex-shrink: 0;
+}
+
+/* ── Scotch sur les cartes cibles et quêtes ── */
+.target-frame { position: relative; }
+.target-frame::before {
+  content: "";
+  position: absolute;
+  top: -8px; left: 50%;
+  transform: translateX(-50%) rotate(-2deg);
+  width: 60px; height: 22px;
+  background: url("images/scotch.png") center / contain no-repeat;
+  opacity: .55;
+  pointer-events: none;
+  z-index: 2;
+}
+
+/* sang sur résultat raté */
+.big-roll.bad::after {
+  content: "";
+  position: absolute;
+  top: -8px; right: -8px;
+  width: 90px; height: 90px;
+  background: url("images/sang.png") center / contain no-repeat;
+  opacity: .18;
+  pointer-events: none;
+}
+
+/* sang sur lock screen */
+.lock-content::after {
+  content: "";
+  position: absolute;
+  bottom: -14px; left: -14px;
+  width: 100px; height: 100px;
+  background: url("images/sang.png") center / contain no-repeat;
+  opacity: .12;
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* scotch sur cartes quêtes */
+.quest-frame { position: relative; }
+.quest-frame::before {
+  content: "";
+  position: absolute;
+  top: -7px; right: 18px;
+  width: 50px; height: 18px;
+  background: url("images/scotch.png") center / contain no-repeat;
+  opacity: .45;
+  pointer-events: none;
+  z-index: 2;
+  transform: rotate(1.5deg);
+}
+
+.player-name {
+  font-family: 'Bebas Neue', 'Inter', sans-serif;
+  font-size: 36px;
+  letter-spacing: .06em;
+  color: var(--text);
+}
+.player-sub {
+  font-family: 'Share Tech Mono', monospace;
+  font-size: 10px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: .16em;
+}
+
+/* ── Stats ── */
+.stat-strip {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0,1fr));
+  gap: 8px;
+}
+
+.token {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 11px;
+  border-radius: 2px;
+  background: var(--bg2);
+  border: 1px solid var(--line);
+}
+.token-ico { font-size: 16px; }
+.token .mini { font-family: 'Share Tech Mono', monospace; font-size: 10px; }
+.token div > div:last-child { font-weight: 800; font-family: 'Share Tech Mono', monospace; }
+
+.hearts { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 8px; }
+.heart  { width: 20px; height: 20px; display: inline-flex; align-items: center; justify-content: center; font-size: 14px; }
+.heart.off { opacity: .18; filter: grayscale(1); }
+
+.resource-grid { display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: 8px; }
+
+.kv {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 9px 12px;
+  border-radius: 2px;
+  background: var(--bg2);
+  border: 1px solid var(--line);
+}
+
+/* ── Quests ── */
+.quest.active {
+  outline: 1px solid var(--gold);
+  box-shadow: 0 0 0 3px var(--gold-soft);
+}
+
+/* ── Progress bars ── */
+.progress-wrap { display: grid; gap: 8px; margin-top: 10px; }
+.progress-row  { display: grid; grid-template-columns: 110px 1fr 42px; gap: 10px; align-items: center; }
+.progress-bar  { height: 6px; border-radius: 0; background: var(--bg2); border: 1px solid var(--line); overflow: hidden; }
+.progress-fill { height: 100%; border-radius: 0; background: linear-gradient(90deg, var(--blood), var(--gold)); }
+
+/* ── Phase focus ── */
+.phase-focus {
+  margin-top: 16px;
+  padding: 14px 16px;
+  border-radius: 2px;
+  border-left: 3px solid var(--blood);
+  border-top: 1px solid var(--line);
+  border-right: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  background: rgba(192,24,46,.04);
+}
+.phase-title {
+  font-family: 'Bebas Neue', 'Inter', sans-serif;
+  font-size: 26px;
+  letter-spacing: .06em;
+  color: var(--text);
+}
+.phase-sub { font-size: 12px; color: var(--muted); margin-top: 4px; font-family: 'Share Tech Mono', monospace; }
+
+/* ── D20 roll display ── */
+.big-roll {
+  padding: 18px;
+  border-radius: 2px;
+  border: 1px solid var(--line);
+  background: var(--bg2);
+  text-align: center;
+}
+.big-roll-num {
+  font-family: 'Bebas Neue', 'Inter', sans-serif;
+  font-size: 96px;
+  font-weight: 900;
+  line-height: 1;
+  letter-spacing: .04em;
+}
+.big-roll.ok  {
+  border-color: var(--green);
+  background: rgba(74,158,106,.06);
+  box-shadow: inset 0 0 0 1px rgba(74,158,106,.2);
+}
+.big-roll.ok .big-roll-num { color: var(--green); }
+.big-roll.bad {
+  border-color: var(--blood);
+  background: rgba(192,24,46,.06);
+  box-shadow: inset 0 0 0 1px rgba(192,24,46,.2);
+}
+.big-roll.bad .big-roll-num { color: var(--blood); }
+
+.roll-badge {
+  display: inline-flex;
+  padding: 4px 10px;
+  border-radius: 2px;
+  background: transparent;
+  border: 1px solid var(--line);
+  font-family: 'Share Tech Mono', monospace;
+  font-size: 11px;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+/* ── D20 cinematic glow ── */
+.d20-cinematic { position: relative; overflow: hidden; }
+.d20-cinematic::before {
+  content: "";
+  position: absolute;
+  inset: -30%;
+  background: conic-gradient(from 0deg, transparent, rgba(200,149,42,.04), transparent 30%, transparent 70%, rgba(192,24,46,.06), transparent);
+  animation: spinGlow 4s linear infinite;
+  pointer-events: none;
+}
+@keyframes spinGlow { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+
+/* ── Toast ── */
+.toastish {
+  padding: 10px 12px;
+  border-radius: 2px;
+  background: rgba(192,24,46,.08);
+  border-left: 2px solid var(--blood);
+  border-top: 1px solid rgba(192,24,46,.2);
+  border-right: 1px solid rgba(192,24,46,.2);
+  border-bottom: 1px solid rgba(192,24,46,.2);
+}
+
+/* ── Blood FX ── */
+.blood-overlay {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 9999;
+  opacity: 0;
+  transition: opacity .18s ease;
+}
+.blood-overlay.show { opacity: 1; }
+
+.blood-splash {
+  position: absolute;
+  border-radius: 999px;
+  background: radial-gradient(circle, rgba(192,24,46,.9) 0%, rgba(100,10,20,.8) 45%, rgba(100,10,20,0) 70%);
+  filter: blur(1px);
+}
+
+.screen-flash {
+  position: fixed;
+  inset: 0;
+  background: rgba(192,24,46,.1);
+  pointer-events: none;
+  z-index: 9998;
+  opacity: 0;
+}
+.screen-flash.show { animation: flashHit .28s ease; }
+
+@keyframes flashHit {
+  0%   { opacity: 0; }
+  20%  { opacity: 1; }
+  100% { opacity: 0; }
+}
+
+/* ── Shake ── */
+.shake { animation: shake .28s ease; }
+@keyframes shake {
+  0%   { transform: translate(0,0); }
+  20%  { transform: translate(-4px, 2px); }
+  40%  { transform: translate(5px,-2px); }
+  60%  { transform: translate(-3px, 1px); }
+  80%  { transform: translate(2px,-1px); }
+  100% { transform: translate(0,0); }
+}
+
+/* ── Bouton mute ── */
+#btn-mute {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  z-index: 9990;
+  width: 44px;
+  height: 44px;
+  border-radius: 2px;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  color: var(--text);
+  font-size: 20px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 2px 12px rgba(0,0,0,.6);
+  transition: border-color .15s, background .15s;
+}
+#btn-mute:hover { border-color: var(--gold); background: var(--panel2); }
+
+/* ── Log ── */
+.log { max-height: 340px; overflow: auto; }
+.log div {
+  background: var(--bg2);
+  border-radius: 0;
+  border-left: 2px solid var(--faded);
+  padding: 7px 10px;
+  margin-bottom: 6px;
+  color: var(--muted);
+  font-family: 'Share Tech Mono', monospace;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.muted-hide  { opacity: .3; filter: saturate(.4); }
+.collapsible { display: none; }
+
+/* ── Lock screen ── */
+.lock-screen {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg);
+  background-image:
+    repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(255,255,255,.012) 2px, rgba(255,255,255,.012) 4px);
+}
+
+.lock-content {
+  text-align: center;
+  padding: 48px 28px;
+  max-width: 420px;
+  width: 100%;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  position: relative;
+}
+.lock-content::before {
+  content: "";
+  position: absolute;
+  top: 0; right: 0;
+  width: 18px; height: 18px;
+  background: var(--bg);
+  clip-path: polygon(0 0, 100% 0, 100% 100%);
+}
+
+.lock-icon {
+  font-size: 48px;
+  margin-bottom: 24px;
+  display: block;
+}
+
+.lock-label {
+  font-family: 'Share Tech Mono', monospace;
+  font-size: 10px;
+  letter-spacing: .22em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-bottom: 12px;
+}
+
+.lock-name {
+  font-family: 'Bebas Neue', 'Inter', sans-serif;
+  font-size: 52px;
+  letter-spacing: .06em;
+  color: var(--gold);
+  line-height: 1;
+  margin-bottom: 12px;
+}
+
+.lock-hint {
+  font-size: 12px;
+  color: var(--muted);
+  font-family: 'Share Tech Mono', monospace;
+  line-height: 1.6;
+  margin: 0 0 28px 0;
+}
+
+/* ── Summary card ── */
+.summary-card {
+  border-color: var(--gold-line);
+  background: var(--gold-soft);
+}
+
+/* ── Target layout ── */
+.target-layout {
+  display: grid;
+  grid-template-columns: 200px 1fr;
+  gap: 16px;
+  align-items: start;
+}
+
+.target-img {
+  width: 100%;
+  aspect-ratio: 2 / 3;
+  object-fit: cover;
+  object-position: top;
+  border-radius: 0;
+  display: block;
+  border: 1px solid rgba(192,24,46,.4);
+  filter: contrast(1.05);
+}
+
+.target-details { display: flex; flex-direction: column; }
+
+.target-story {
+  font-family: 'Special Elite', serif;
+  font-size: 13px;
+  line-height: 1.65;
+  color: var(--muted);
+  margin: 10px 0 0 0;
+}
+
+/* ── Phase visibility ── */
+.phase-draft    .only-draft,
+.phase-roll     .only-roll,
+.phase-purchase .only-purchase,
+.phase-action   .only-action,
+.phase-gameover .only-gameover { display: block; }
+
+.phase-draft    .hide-in-draft,
+.phase-roll     .hide-in-roll,
+.phase-purchase .hide-in-purchase,
+.phase-action   .hide-in-action,
+.phase-gameover .hide-in-gameover { display: none; }
+
+/* ── Responsive ── */
+@media (max-width: 1000px) {
+  .hero-grid   { grid-template-columns: 1fr; }
+  .hero-title  { font-size: 48px; }
+  .g2, .g3, .g4, .screen-grid, .stat-strip,
+  .resource-grid, .progress-row { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 768px) {
+  .wrap          { padding: 12px; }
+  .hero-title    { font-size: 38px; }
+  .hero-sub      { font-size: 13px; }
+  .phase-title   { font-size: 22px; }
+  .player-name   { font-size: 28px; }
+  .big           { font-size: 52px; }
+  .big-roll-num  { font-size: 72px; }
+  .card          { padding: 14px; }
+  .stat-strip    { grid-template-columns: repeat(2, 1fr); }
+  .resource-grid { grid-template-columns: repeat(2, 1fr); }
+  .progress-row  { grid-template-columns: 80px 1fr 32px; }
+  .log           { max-height: 200px; }
+}
+
+@media (max-width: 600px) {
+  .target-layout { grid-template-columns: 1fr; }
+  .target-img    { aspect-ratio: 3 / 2; object-position: center top; }
+}
+
+@media (max-width: 480px) {
+  .wrap          { padding: 10px; }
+  .hero-title    { font-size: 30px; }
+  .phase-title   { font-size: 18px; }
+  .player-name   { font-size: 24px; }
+  .big           { font-size: 40px; }
+  .big-roll-num  { font-size: 56px; }
+  .lock-name     { font-size: 38px; }
+  .lock-icon     { font-size: 36px; }
+  .card          { padding: 12px; }
+  .btn           { padding: 12px 14px; font-size: 12px; min-height: 44px; }
+  .stat-strip    { grid-template-columns: repeat(2, 1fr); }
+  .resource-grid { grid-template-columns: 1fr; }
+  .progress-row  { grid-template-columns: 1fr; gap: 4px; }
+  .token         { padding: 8px 10px; }
+  .chip, .badge, .badge-rare { font-size: 10px; padding: 4px 7px; }
+  .log           { max-height: 160px; }
+}
