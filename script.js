@@ -141,6 +141,7 @@ const supa = supabase.createClient(SUPA_URL, SUPA_KEY);
 
 let __gameCode    = null;  // code de la partie en cours
 let __myPlayerId  = null;  // id du joueur local
+let __isHost      = false; // est-ce que je suis l'hôte ?
 let __realtimeSub = null;  // abonnement realtime
 let __isSyncing   = false; // évite les boucles de sync
 
@@ -149,10 +150,12 @@ function genCode() {
   return Array.from({length:4}, () => "ABCDEFGHJKLMNPQRSTUVWXYZ"[Math.floor(Math.random()*23)]).join("");
 }
 
-// Sauvegarder l'état complet dans Supabase
+// Sauvegarder l'état complet dans Supabase (sans les données UI locales)
 async function syncToCloud() {
-  if (!__gameCode || __isSyncing) return;
-  await supa.from("games").upsert({ code: __gameCode, state: JSON.parse(JSON.stringify(state)), updated_at: new Date().toISOString() });
+  if (!__gameCode || __isSyncing || !__isHost) return; // seul l'hôte sync l'état principal
+  const toSync = JSON.parse(JSON.stringify(state));
+  delete toSync.lobby; // ne pas partager les données locales
+  await supa.from("games").upsert({ code: __gameCode, state: toSync, updated_at: new Date().toISOString() });
 }
 
 // Charger l'état depuis Supabase
@@ -179,8 +182,10 @@ function subscribeRealtime(code) {
 async function createOnlineGame() {
   const code = genCode();
   __gameCode   = code;
-  __myPlayerId = state.setup[0]?.id || "host";
-  const { error } = await supa.from("games").insert({ code, state: JSON.parse(JSON.stringify(state)) });
+  __isHost     = true;
+  const toSync = JSON.parse(JSON.stringify(state));
+  delete toSync.lobby;
+  const { error } = await supa.from("games").insert({ code, state: toSync });
   if (error) { alert("Erreur création partie : " + error.message); return; }
   subscribeRealtime(code);
   return code;
@@ -191,8 +196,13 @@ async function joinOnlineGame(code) {
   const { data, error } = await supa.from("games").select("state").eq("code", code).single();
   if (error || !data) { alert("Code introuvable. Vérifie le code et réessaie."); return false; }
   __gameCode = code;
+  __isHost   = false;
   subscribeRealtime(code);
-  await loadFromCloud(data.state);
+  // Charge l'état sans écraser les données locales
+  __isSyncing = true;
+  const remote = data.state;
+  Object.keys(remote).forEach(k => { if (k !== "lobby") state[k] = remote[k]; });
+  __isSyncing = false;
   return true;
 }
 
@@ -690,7 +700,7 @@ function triggerBloodEffect(intense = false) {
 // ── Screen renderers ──────────────────────
 
 function renderLobby() {
-  const isHost = state.lobby && state.lobby.isHost;
+  const isHost = __isHost;
   const code   = __gameCode || "----";
   const players = state.lobby ? state.lobby.players || [] : [];
   if (isHost) {
@@ -2370,7 +2380,7 @@ async function joinOnlineAction() {
 }
 
 async function onlineLaunchAction() {
-  if (!state.lobby || !state.lobby.isHost) return;
+  if (!__isHost) return;
   state.mode = "multi";
   state.screen = "setup";
   state.setupStep = 0;
