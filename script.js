@@ -158,11 +158,13 @@ async function syncToCloud() {
   await supa.from("games").upsert({ code: __gameCode, state: toSync, updated_at: new Date().toISOString() });
 }
 
-// Charger l'état depuis Supabase
+// Charger l'état depuis Supabase (côté non-hôte uniquement)
 async function loadFromCloud(remoteState) {
-  if (!remoteState) return;
+  if (!remoteState || __isHost) return;
   __isSyncing = true;
-  Object.assign(state, remoteState);
+  const lobby = state.lobby; // préserver les données locales
+  Object.keys(remoteState).forEach(k => { state[k] = remoteState[k]; });
+  state.lobby = lobby;
   render();
   __isSyncing = false;
 }
@@ -2387,6 +2389,10 @@ async function onlineLaunchAction() {
   state.setupLock = false;
   initSetup();
   render();
+  // Force la sync immédiate vers Supabase pour que les autres voient le changement
+  const toSync = JSON.parse(JSON.stringify(state));
+  delete toSync.lobby;
+  await supa.from("games").upsert({ code: __gameCode, state: toSync, updated_at: new Date().toISOString() });
 }
 
 function setupNextAction() {
