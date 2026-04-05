@@ -704,8 +704,8 @@ function renderLobby() {
           ${players.map(p => `<div class="pill"><span>${esc(p.name || "Joueur " + p.idx)}</span><span class="badge">Connecté</span></div>`).join("") || '<div class="mini" style="text-align:center;margin-top:8px">En attente des joueurs…</div>'}
         </div>
         <div style="margin-top:20px">
-          <button class="btn cyan" data-act="online-launch" ${players.length < 1 ? "disabled" : ""} style="width:100%">
-            Lancer la partie (${players.length + 1}/${state.playerCount} joueurs)
+          <button class="btn cyan" data-act="online-launch" style="width:100%">
+            Lancer la partie →
           </button>
         </div>
       </div>
@@ -2371,10 +2371,11 @@ async function joinOnlineAction() {
 
 async function onlineLaunchAction() {
   if (!state.lobby || !state.lobby.isHost) return;
-  // Lance la partie côté hôte — le state sera synced et tous les autres verront
+  state.mode = "multi";
   state.screen = "setup";
   state.setupStep = 0;
   state.setupLock = false;
+  initSetup();
   render();
 }
 
