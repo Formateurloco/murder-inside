@@ -133,6 +133,72 @@ const state = {
   duel: null
 };
 
+// ── Supabase Multijoueur ──────────────────
+
+const SUPA_URL = "https://lpnclqfcshuhppbrhaiw.supabase.co";
+const SUPA_KEY = "sb_publishable_7kMPJ5D_MfqY9piihSxVSg_jWjRQv1U";
+const supa = supabase.createClient(SUPA_URL, SUPA_KEY);
+
+let __gameCode    = null;  // code de la partie en cours
+let __myPlayerId  = null;  // id du joueur local
+let __realtimeSub = null;  // abonnement realtime
+let __isSyncing   = false; // évite les boucles de sync
+
+// Générer un code de partie à 4 lettres
+function genCode() {
+  return Array.from({length:4}, () => "ABCDEFGHJKLMNPQRSTUVWXYZ"[Math.floor(Math.random()*23)]).join("");
+}
+
+// Sauvegarder l'état complet dans Supabase
+async function syncToCloud() {
+  if (!__gameCode || __isSyncing) return;
+  await supa.from("games").upsert({ code: __gameCode, state: JSON.parse(JSON.stringify(state)), updated_at: new Date().toISOString() });
+}
+
+// Charger l'état depuis Supabase
+async function loadFromCloud(remoteState) {
+  if (!remoteState) return;
+  __isSyncing = true;
+  Object.assign(state, remoteState);
+  render();
+  __isSyncing = false;
+}
+
+// S'abonner aux changements en temps réel
+function subscribeRealtime(code) {
+  if (__realtimeSub) supa.removeChannel(__realtimeSub);
+  __realtimeSub = supa.channel("game-" + code)
+    .on("postgres_changes", { event: "*", schema: "public", table: "games", filter: "code=eq." + code },
+      payload => {
+        if (payload.new && payload.new.state) loadFromCloud(payload.new.state);
+      })
+    .subscribe();
+}
+
+// Créer une nouvelle partie en ligne
+async function createOnlineGame() {
+  const code = genCode();
+  __gameCode   = code;
+  __myPlayerId = state.setup[0]?.id || "host";
+  const { error } = await supa.from("games").insert({ code, state: JSON.parse(JSON.stringify(state)) });
+  if (error) { alert("Erreur création partie : " + error.message); return; }
+  subscribeRealtime(code);
+  return code;
+}
+
+// Rejoindre une partie existante
+async function joinOnlineGame(code) {
+  const { data, error } = await supa.from("games").select("state").eq("code", code).single();
+  if (error || !data) { alert("Code introuvable. Vérifie le code et réessaie."); return false; }
+  __gameCode = code;
+  subscribeRealtime(code);
+  await loadFromCloud(data.state);
+  return true;
+}
+
+// Patch : toutes les actions appellent syncToCloud à la fin
+const __origRender = window.render;
+
 // ── Utilities ─────────────────────────────
 
 function esc(s) {
@@ -290,7 +356,9 @@ function render() {
   const ae  = document.activeElement;
   const focus = ae && ae.getAttribute ? { key: ae.getAttribute("data-focus"), start: ae.selectionStart || 0 } : null;
   const inSeqPhase = state.screen === "game" && state.phase === "roll";
-  if (state.lockScreen) {
+  if (state.screen === "lobby") {
+    app.innerHTML = renderLobby();
+  } else if (state.lockScreen) {
     app.innerHTML = renderLockScreen();
   } else if (state.privateView) {
     app.innerHTML = renderPrivateView();
@@ -309,6 +377,8 @@ function render() {
     const el = document.querySelector(`[data-focus="${focus.key}"]`);
     if (el) { el.focus(); try { el.setSelectionRange(focus.start, focus.start); } catch (e) {} }
   }
+  // Sync cloud après chaque render (sauf pendant la sync elle-même)
+  if (__gameCode && !__isSyncing) syncToCloud();
 }
 
 function iconToken(icon, label, value) {
@@ -619,6 +689,42 @@ function triggerBloodEffect(intense = false) {
 
 // ── Screen renderers ──────────────────────
 
+function renderLobby() {
+  const isHost = state.lobby && state.lobby.isHost;
+  const code   = __gameCode || "----";
+  const players = state.lobby ? state.lobby.players || [] : [];
+  if (isHost) {
+    return `<div class="wrap" style="max-width:480px;margin:0 auto;padding-top:60px">
+      <div class="card">
+        <div class="chip">Partie en ligne</div>
+        <div class="hero-title" style="font-size:42px;margin-top:16px">Code de la partie</div>
+        <div style="font-family:'Bebas Neue',sans-serif;font-size:80px;letter-spacing:.12em;color:var(--gold);text-align:center;margin:20px 0">${code}</div>
+        <p class="mini" style="text-align:center;line-height:1.6">Partage ce code aux autres joueurs.<br>Attends qu'ils rejoignent, puis lance la partie.</p>
+        <div class="grid" style="margin-top:16px">
+          ${players.map(p => `<div class="pill"><span>${esc(p.name || "Joueur " + p.idx)}</span><span class="badge">Connecté</span></div>`).join("") || '<div class="mini" style="text-align:center;margin-top:8px">En attente des joueurs…</div>'}
+        </div>
+        <div style="margin-top:20px">
+          <button class="btn cyan" data-act="online-launch" ${players.length < 1 ? "disabled" : ""} style="width:100%">
+            Lancer la partie (${players.length + 1}/${state.playerCount} joueurs)
+          </button>
+        </div>
+      </div>
+    </div>`;
+  } else {
+    return `<div class="wrap" style="max-width:480px;margin:0 auto;padding-top:60px">
+      <div class="card">
+        <div class="chip">Partie en ligne</div>
+        <div class="hero-title" style="font-size:36px;margin-top:16px">En attente du lancement…</div>
+        <div style="font-family:'Bebas Neue',sans-serif;font-size:80px;letter-spacing:.12em;color:var(--gold);text-align:center;margin:20px 0">${code}</div>
+        <p class="mini" style="text-align:center;line-height:1.6">Tu es connecté. L'hôte va lancer la partie.</p>
+        <div class="grid" style="margin-top:16px">
+          ${players.map(p => `<div class="pill"><span>${esc(p.name || "Joueur " + p.idx)}</span><span class="badge">Connecté</span></div>`).join("")}
+        </div>
+      </div>
+    </div>`;
+  }
+}
+
 function renderHome() {
   return `<div class="wrap">
     <div class="hero-grid">
@@ -648,6 +754,24 @@ function renderHome() {
           <p class="mini" style="margin-top:8px;line-height:1.55">Un événement système se déclenche à chaque tour. Pression maximale, aucune aide.</p>
           <div style="margin-top:14px">
             <button class="btn pink" data-act="start-solo">Mode solo →</button>
+          </div>
+        </div>
+
+        <div class="section-card" style="margin-top:12px">
+          <div class="label-top">Mode en ligne · Chacun sur son écran</div>
+          <p class="mini" style="margin-top:8px;line-height:1.55">Crée une partie et partage le code. Chaque joueur joue depuis son propre appareil en temps réel.</p>
+          <div class="grid" style="margin-top:14px;gap:10px">
+            <div>
+              <div class="mini" style="margin-bottom:6px">Nombre de joueurs</div>
+              <select class="select" id="player-count-home" style="width:130px">
+                ${[2,3,4].map(n => `<option value="${n}" ${n === state.playerCount ? "selected" : ""}>${n} joueurs</option>`).join("")}
+              </select>
+            </div>
+            <button class="btn cyan" data-act="start-online" style="align-self:flex-end">Créer une partie →</button>
+          </div>
+          <div style="margin-top:12px;display:flex;gap:8px;align-items:center">
+            <input class="input" id="join-code" placeholder="Code à 4 lettres" style="width:150px;text-transform:uppercase">
+            <button class="btn outline" data-act="join-online">Rejoindre →</button>
           </div>
         </div>
       </div>
@@ -2221,6 +2345,39 @@ function startSetupAction() { state.mode = "multi"; state.playerCount = Math.max
 function startSoloAction()  { state.mode = "solo";  state.playerCount = 1; state.screen = "setup"; state.setupStep = 0; state.setupLock = false; initSetup(); render(); }
 function setPlayerCountAction(v) { state.playerCount = Number(v); }
 
+async function startOnlineAction() {
+  state.mode = "multi";
+  state.playerCount = Math.max(2, state.playerCount);
+  initSetup();
+  state.lobby = { isHost: true, players: [] };
+  state.screen = "lobby";
+  render();
+  const code = await createOnlineGame();
+  if (!code) return;
+  render();
+}
+
+async function joinOnlineAction() {
+  const input = document.getElementById("join-code");
+  const code  = (input ? input.value.trim().toUpperCase() : "");
+  if (code.length !== 4) { alert("Entre un code à 4 lettres."); return; }
+  const ok = await joinOnlineGame(code);
+  if (!ok) return;
+  // Enregistre ce joueur comme non-hôte
+  state.lobby = { isHost: false, players: [] };
+  state.screen = "lobby";
+  render();
+}
+
+async function onlineLaunchAction() {
+  if (!state.lobby || !state.lobby.isHost) return;
+  // Lance la partie côté hôte — le state sera synced et tous les autres verront
+  state.screen = "setup";
+  state.setupStep = 0;
+  state.setupLock = false;
+  render();
+}
+
 function setupNextAction() {
   const p = state.setup[state.setupStep];
   if (!p.name.trim()) { alert("Entre un surnom avant de continuer."); return; }
@@ -2338,6 +2495,9 @@ document.addEventListener("click", e => {
   const a = t.dataset.act;
   if (a === "start-setup")   startSetupAction();
   if (a === "start-solo")    startSoloAction();
+  if (a === "start-online")  startOnlineAction();
+  if (a === "join-online")   joinOnlineAction();
+  if (a === "online-launch") onlineLaunchAction();
   if (a === "launch")        launchAction();
   if (a === "toggle-quest")  toggleQuestAction(Number(t.dataset.idx), t.dataset.qid);
   if (a === "pick-die")      pickDieAction(t.dataset.die);
