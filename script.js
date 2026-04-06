@@ -141,6 +141,7 @@ const supa = supabase.createClient(SUPA_URL, SUPA_KEY);
 
 let __gameCode    = null;
 let __isHost      = false;
+let __myIdx       = 0;     // index du joueur local (0 = hôte, 1, 2, 3...)
 let __channel     = null;
 let __isSyncing   = false;
 let __connectedPlayers = 0; // nb de joueurs connectés (hors hôte)
@@ -166,9 +167,25 @@ function joinChannel(code) {
   // L'hôte reçoit les "pings" des joueurs qui rejoignent
   __channel.on("broadcast", { event: "ping" }, () => {
     __connectedPlayers++;
+    // Assigne un index au nouveau joueur via broadcast
+    __channel.send({ type: "broadcast", event: "assign", payload: { idx: __connectedPlayers } });
     render();
-    // Envoie l'état actuel au nouveau joueur
     broadcastState();
+  });
+
+  // Les non-hôtes reçoivent leur index assigné
+  __channel.on("broadcast", { event: "assign" }, ({ payload }) => {
+    if (__isHost || !payload) return;
+    __myIdx = payload.idx;
+  });
+
+  // L'hôte reçoit les fiches remplies des autres joueurs
+  __channel.on("broadcast", { event: "setup-player" }, ({ payload }) => {
+    if (!__isHost || !payload) return;
+    if (state.setup[payload.idx]) {
+      Object.assign(state.setup[payload.idx], payload.player);
+      render(); // refresh pour que l'hôte voit le statut "prêt"
+    }
   });
 
   // Les non-hôtes reçoivent l'état de l'hôte
@@ -715,8 +732,11 @@ function renderLobby() {
           ${__connectedPlayers === 0 ? '<span class="mini">En attente…</span>' : '<span class="badge" style="color:var(--green)">✓ Prêt</span>'}
         </div>
         <div style="margin-top:20px">
-          <button class="btn cyan" data-act="online-launch" style="width:100%">
-            Lancer la partie (${total} joueur${total > 1 ? "s" : ""}) →
+          <button class="btn cyan" data-act="online-launch" style="width:100%"
+            ${total < state.playerCount ? "disabled" : ""}>
+            ${total < state.playerCount
+              ? `En attente… (${total}/${state.playerCount})`
+              : `Lancer la partie (${total} joueurs) →`}
           </button>
         </div>
       </div>
@@ -808,6 +828,33 @@ function renderHome() {
 }
 
 function renderSetup() {
+  // Mode en ligne : chaque appareil remplit sa propre fiche
+  if (__gameCode) {
+    const i = __myIdx;
+    const p = state.setup[i];
+    if (!p) return `<div class="wrap"><div class="card"><p class="mini">Chargement…</p></div></div>`;
+    const myReady = p.name.trim() && p.chosen.length === 3;
+    const allReady = state.setup.every(x => x.name.trim() && x.chosen.length === 3);
+    return `<div class="wrap">
+      <div class="card">
+        <div class="chip">Joueur ${i + 1} · ${__isHost ? "Hôte" : "Connecté"}</div>
+        <h2 style="margin-top:8px">Construis ton profil criminel</h2>
+        <p class="mini">Remplis ta fiche. L'hôte lancera la partie quand tout le monde sera prêt.</p>
+      </div>
+      <div style="margin-top:16px">${renderSetupPlayer(p, i)}</div>
+      ${myReady
+        ? `<div class="note" style="margin-top:16px;text-align:center">
+            ✓ Ton profil est prêt. Attends les autres joueurs.
+            ${__isHost && allReady ? `<div style="margin-top:12px"><button class="btn cyan" data-act="launch">Lancer la partie →</button></div>` : ""}
+            ${__isHost && !allReady ? `<div class="mini" style="margin-top:8px">En attente que tous les joueurs remplissent leur fiche…</div>` : ""}
+           </div>`
+        : `<div class="row" style="margin-top:16px">
+            <button class="btn cyan" data-act="online-setup-ready">Valider mon profil ✓</button>
+           </div>`}
+    </div>`;
+  }
+
+  // Mode local (passe-appareil) — comportement original
   const i    = state.setupStep;
   const p    = state.setup[i];
   const isLast = i === state.setup.length - 1;
@@ -2353,6 +2400,19 @@ function startSetupAction() { state.mode = "multi"; state.playerCount = Math.max
 function startSoloAction()  { state.mode = "solo";  state.playerCount = 1; state.screen = "setup"; state.setupStep = 0; state.setupLock = false; initSetup(); render(); }
 function setPlayerCountAction(v) { state.playerCount = Number(v); }
 
+// Valider sa fiche en mode en ligne (non-hôte)
+function onlineSetupReadyAction() {
+  const p = state.setup[__myIdx];
+  if (!p) return;
+  if (!p.name.trim()) { alert("Entre un surnom avant de continuer."); return; }
+  if (p.chosen.length !== 3) { alert("Choisis exactement 3 quêtes avant de continuer."); return; }
+  // Envoie la fiche complète à l'hôte via broadcast
+  if (__channel) {
+    __channel.send({ type: "broadcast", event: "setup-player", payload: { idx: __myIdx, player: JSON.parse(JSON.stringify(p)) } });
+  }
+  render();
+}
+
 function startOnlineAction() {
   state.mode = "multi";
   state.playerCount = Math.max(2, state.playerCount);
@@ -2536,6 +2596,7 @@ document.addEventListener("click", e => {
   if (a === "close-private") { state.privateView = null; render(); }
   if (a === "cancel-lock")   { state.lockScreen = null; render(); }
   if (a === "pick-gender")   { state.setup[Number(t.dataset.idx)].gender = t.dataset.gender; render(); }
+  if (a === "online-setup-ready") onlineSetupReadyAction();
   if (a === "setup-next")    setupNextAction();
   if (a === "setup-unlock")  { state.setupLock = false; render(); }
   if (a === "draft-unlock")  { state.draftLocked = false; render(); }
