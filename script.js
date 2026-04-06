@@ -133,111 +133,147 @@ const state = {
   duel: null
 };
 
-// ── Supabase Multijoueur ──────────────────
+// ── Supabase Multijoueur (polling) ───────────────────
 
 const SUPA_URL = "https://lpnclqfcshuhppbrhaiw.supabase.co";
 const SUPA_KEY = "sb_publishable_7kMPJ5D_MfqY9piihSxVSg_jWjRQv1U";
 const supa = supabase.createClient(SUPA_URL, SUPA_KEY);
 
-let __gameCode    = null;
-let __isHost      = false;
-let __myIdx       = 0;     // index du joueur local (0 = hôte, 1, 2, 3...)
-let __channel     = null;
-let __isSyncing   = false;
-let __connectedPlayers = 0; // nb de joueurs connectés (hors hôte)
+let __gameCode         = null;
+let __isHost           = false;
+let __myIdx            = 0;      // 0 = hôte, 1+ = joueurs
+let __pollInterval     = null;
+let __isSyncing        = false;
+let __connectedPlayers = 0;
 
-// Générer un code de partie à 4 lettres
+// Code à 4 lettres
 function genCode() {
   return Array.from({length:4}, () => "ABCDEFGHJKLMNPQRSTUVWXYZ"[Math.floor(Math.random()*23)]).join("");
 }
 
-// Broadcaster l'état à tous les autres (via Broadcast — pas besoin de réplication)
-function broadcastState() {
-  if (!__channel || !__isHost || __isSyncing) return;
-  const toSend = JSON.parse(JSON.stringify(state));
-  delete toSend.lobby;
-  __channel.send({ type: "broadcast", event: "state", payload: toSend });
+// Hôte : écrire l'état complet dans Supabase (async, silencieux)
+async function syncToCloud() {
+  if (!__gameCode || !__isHost || __isSyncing) return;
+  try {
+    await supa.from("games").upsert(
+      { code: __gameCode, host_state: JSON.parse(JSON.stringify(state)), updated_at: new Date().toISOString() },
+      { onConflict: "code" }
+    );
+  } catch(e) {}
 }
 
-// Rejoindre le channel avec Presence (tracking automatique des connectés)
-function joinChannel(code) {
-  if (__channel) supa.removeChannel(__channel);
-  __channel = supa.channel("game-" + code, {
-    config: { presence: { key: __isHost ? "host" : "player-" + Date.now() }, broadcast: { self: false } }
-  });
+// Appelé par render() — déclenche la sync en arrière-plan
+function broadcastState() { syncToCloud(); }
 
-  // ── Presence : qui est connecté ──
-  __channel.on("presence", { event: "sync" }, () => {
-    const state_presence = __channel.presenceState();
-    const keys = Object.keys(state_presence);
-    __connectedPlayers = Math.max(0, keys.length - 1); // hôte non compté
-    render();
-    // L'hôte rebroadcast son état à chaque nouvelle connexion
-    if (__isHost) broadcastState();
-  });
-
-  __channel.on("presence", { event: "join" }, ({ newPresences }) => {
-    if (!__isHost) return;
-    // Assigne un index à chaque nouveau joueur
-    newPresences.forEach(p => {
-      if (p.key === "host") return;
-      const idx = Object.keys(__channel.presenceState()).filter(k => k !== "host").indexOf(p.key);
-      __channel.send({ type: "broadcast", event: "assign", payload: { presenceKey: p.key, idx: idx + 1 } });
-    });
-  });
-
-  // Les non-hôtes reçoivent leur index
-  __channel.on("broadcast", { event: "assign" }, ({ payload }) => {
-    if (__isHost || !payload) return;
-    if (__myIdx === 0) __myIdx = payload.idx || 1;
-  });
-
-  // L'hôte reçoit les fiches remplies
-  __channel.on("broadcast", { event: "setup-player" }, ({ payload }) => {
-    if (!__isHost || !payload) return;
-    if (state.setup[payload.idx]) {
-      Object.assign(state.setup[payload.idx], payload.player);
-      render();
-    }
-  });
-
-  // Les non-hôtes reçoivent l'état complet
-  __channel.on("broadcast", { event: "state" }, ({ payload }) => {
-    if (__isHost || !payload) return;
-    __isSyncing = true;
-    const lobby = state.lobby;
-    const myIdx = __myIdx;
-    Object.keys(payload).forEach(k => { state[k] = payload[k]; });
-    state.lobby = lobby;
-    __myIdx = myIdx;
-    __isSyncing = false;
-    render();
-  });
-
-  __channel.subscribe(async status => {
-    if (status === "SUBSCRIBED") {
-      // S'annoncer dans la presence
-      await __channel.track({ online: true, isHost: __isHost });
-    }
-  });
+// Arrêter le polling
+function stopPolling() {
+  if (__pollInterval) { clearInterval(__pollInterval); __pollInterval = null; }
 }
 
-// Créer une nouvelle partie
+// Démarrer le polling toutes les 1,5 s
+function startPolling(code) {
+  stopPolling();
+  __pollInterval = setInterval(async () => {
+    try {
+      if (__isHost) {
+        // Hôte : vérifier les connexions et les fiches soumises
+        const { data } = await supa.from("games").select("joined, submissions").eq("code", code).single();
+        if (!data) return;
+
+        const joined    = Array.isArray(data.joined) ? data.joined : [];
+        const newCount  = joined.filter(i => i !== 0).length;
+        let needRender  = newCount !== __connectedPlayers;
+        if (needRender) __connectedPlayers = newCount;
+
+        const submissions = data.submissions || {};
+        Object.keys(submissions).forEach(idx => {
+          const i = Number(idx);
+          if (i > 0 && state.setup[i]) {
+            const sub = submissions[idx];
+            if (JSON.stringify(state.setup[i]) !== JSON.stringify(sub)) {
+              Object.assign(state.setup[i], sub);
+              needRender = true;
+            }
+          }
+        });
+        if (needRender) render();
+
+      } else {
+        // Non-hôte : lire l'état de l'hôte et l'appliquer
+        const { data } = await supa.from("games").select("host_state").eq("code", code).single();
+        if (!data || !data.host_state || typeof data.host_state !== "object") return;
+        const hs = data.host_state;
+
+        __isSyncing = true;
+        const myIdx   = __myIdx;
+        const mySetup = (state.screen === "setup" && state.setup && state.setup[myIdx])
+          ? JSON.parse(JSON.stringify(state.setup[myIdx])) : null;
+
+        Object.keys(hs).forEach(k => { state[k] = hs[k]; });
+        __myIdx = myIdx;
+
+        // Conserver la fiche locale pendant la phase de setup
+        if (mySetup && state.screen === "setup" && state.setup && state.setup[myIdx]) {
+          state.setup[myIdx] = mySetup;
+        }
+        __isSyncing = false;
+        render();
+      }
+    } catch(e) {}
+  }, 1500);
+}
+
+// Créer une nouvelle partie (hôte)
 async function createOnlineGame() {
   const code = genCode();
   __gameCode = code;
   __isHost   = true;
+  __myIdx    = 0;
   __connectedPlayers = 0;
-  joinChannel(code);
+  try {
+    await supa.from("games").insert({
+      code,
+      host_state: JSON.parse(JSON.stringify(state)),
+      joined: [0],
+      submissions: {}
+    });
+  } catch(e) {}
+  startPolling(code);
   return code;
 }
 
 // Rejoindre une partie existante
-function joinOnlineGame(code) {
-  __gameCode = code;
-  __isHost   = false;
-  joinChannel(code);
-  return true;
+async function joinOnlineGame(code) {
+  try {
+    const { data, error } = await supa.from("games")
+      .select("joined, host_state").eq("code", code).single();
+    if (error || !data) { alert("Code invalide ou partie introuvable."); return false; }
+
+    const joined = Array.isArray(data.joined) ? data.joined : [0];
+    // Trouver le prochain index libre
+    let idx = 1;
+    while (joined.includes(idx)) idx++;
+    __myIdx    = idx;
+    __gameCode = code;
+    __isHost   = false;
+
+    // S'inscrire dans joined
+    await supa.from("games").update({ joined: [...joined, idx] }).eq("code", code);
+
+    // Appliquer l'état initial de l'hôte
+    if (data.host_state && typeof data.host_state === "object") {
+      __isSyncing = true;
+      Object.keys(data.host_state).forEach(k => { state[k] = data.host_state[k]; });
+      __myIdx     = idx; // restaurer après écrasement
+      __isSyncing = false;
+    }
+
+    startPolling(code);
+    return true;
+  } catch(e) {
+    alert("Erreur de connexion : " + (e.message || e));
+    return false;
+  }
 }
 
 // ── Utilities ─────────────────────────────
@@ -2419,30 +2455,36 @@ function onlineSetupReadyAction() {
   if (!p) return;
   if (!p.name.trim()) { alert("Entre un surnom avant de continuer."); return; }
   if (p.chosen.length !== 3) { alert("Choisis exactement 3 quêtes avant de continuer."); return; }
-  // Envoie la fiche complète à l'hôte via broadcast
-  if (__channel) {
-    __channel.send({ type: "broadcast", event: "setup-player", payload: { idx: __myIdx, player: JSON.parse(JSON.stringify(p)) } });
-  }
+  // Envoyer la fiche à l'hôte via la colonne submissions
+  (async () => {
+    try {
+      const { data } = await supa.from("games").select("submissions").eq("code", __gameCode).single();
+      const submissions = (data && data.submissions) || {};
+      submissions[String(__myIdx)] = JSON.parse(JSON.stringify(p));
+      await supa.from("games").update({ submissions }).eq("code", __gameCode);
+    } catch(e) {}
+  })();
   render();
 }
 
-function startOnlineAction() {
+async function startOnlineAction() {
   state.mode = "multi";
   state.playerCount = Math.max(2, state.playerCount);
-  state.lobby = {};
   state.screen = "lobby";
-  createOnlineGame().then(code => { if (code) render(); });
-  render();
+  render(); // afficher le lobby tout de suite
+  const code = await createOnlineGame();
+  if (code) render();
 }
 
-function joinOnlineAction() {
+async function joinOnlineAction() {
   const input = document.getElementById("join-code");
   const code  = (input ? input.value.trim().toUpperCase() : "");
   if (code.length !== 4) { alert("Entre un code à 4 lettres."); return; }
-  state.lobby = {};
   state.screen = "lobby";
-  joinOnlineGame(code);
-  render();
+  render(); // afficher "connexion…"
+  const ok = await joinOnlineGame(code);
+  if (!ok) { state.screen = "home"; render(); }
+  else render();
 }
 
 function onlineLaunchAction() {
