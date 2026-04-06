@@ -159,52 +159,65 @@ function broadcastState() {
   __channel.send({ type: "broadcast", event: "state", payload: toSend });
 }
 
-// Rejoindre le channel Supabase Broadcast
+// Rejoindre le channel avec Presence (tracking automatique des connectés)
 function joinChannel(code) {
   if (__channel) supa.removeChannel(__channel);
-  __channel = supa.channel("game-" + code, { config: { broadcast: { self: false } } });
-
-  // L'hôte reçoit les "pings" des joueurs qui rejoignent
-  __channel.on("broadcast", { event: "ping" }, () => {
-    __connectedPlayers++;
-    // Assigne un index au nouveau joueur via broadcast
-    __channel.send({ type: "broadcast", event: "assign", payload: { idx: __connectedPlayers } });
-    render();
-    broadcastState();
+  __channel = supa.channel("game-" + code, {
+    config: { presence: { key: __isHost ? "host" : "player-" + Date.now() }, broadcast: { self: false } }
   });
 
-  // Les non-hôtes reçoivent leur index assigné
+  // ── Presence : qui est connecté ──
+  __channel.on("presence", { event: "sync" }, () => {
+    const state_presence = __channel.presenceState();
+    const keys = Object.keys(state_presence);
+    __connectedPlayers = Math.max(0, keys.length - 1); // hôte non compté
+    render();
+    // L'hôte rebroadcast son état à chaque nouvelle connexion
+    if (__isHost) broadcastState();
+  });
+
+  __channel.on("presence", { event: "join" }, ({ newPresences }) => {
+    if (!__isHost) return;
+    // Assigne un index à chaque nouveau joueur
+    newPresences.forEach(p => {
+      if (p.key === "host") return;
+      const idx = Object.keys(__channel.presenceState()).filter(k => k !== "host").indexOf(p.key);
+      __channel.send({ type: "broadcast", event: "assign", payload: { presenceKey: p.key, idx: idx + 1 } });
+    });
+  });
+
+  // Les non-hôtes reçoivent leur index
   __channel.on("broadcast", { event: "assign" }, ({ payload }) => {
     if (__isHost || !payload) return;
-    __myIdx = payload.idx;
+    if (__myIdx === 0) __myIdx = payload.idx || 1;
   });
 
-  // L'hôte reçoit les fiches remplies des autres joueurs
+  // L'hôte reçoit les fiches remplies
   __channel.on("broadcast", { event: "setup-player" }, ({ payload }) => {
     if (!__isHost || !payload) return;
     if (state.setup[payload.idx]) {
       Object.assign(state.setup[payload.idx], payload.player);
-      render(); // refresh pour que l'hôte voit le statut "prêt"
+      render();
     }
   });
 
-  // Les non-hôtes reçoivent l'état de l'hôte
+  // Les non-hôtes reçoivent l'état complet
   __channel.on("broadcast", { event: "state" }, ({ payload }) => {
     if (__isHost || !payload) return;
     __isSyncing = true;
     const lobby = state.lobby;
+    const myIdx = __myIdx;
     Object.keys(payload).forEach(k => { state[k] = payload[k]; });
     state.lobby = lobby;
+    __myIdx = myIdx;
     __isSyncing = false;
     render();
   });
 
-  __channel.subscribe(status => {
-    if (status === "SUBSCRIBED" && !__isHost) {
-      // Signaler à l'hôte qu'on est là
-      setTimeout(() => {
-        __channel.send({ type: "broadcast", event: "ping", payload: {} });
-      }, 500);
+  __channel.subscribe(async status => {
+    if (status === "SUBSCRIBED") {
+      // S'annoncer dans la presence
+      await __channel.track({ online: true, isHost: __isHost });
     }
   });
 }
