@@ -139,77 +139,76 @@ const SUPA_URL = "https://lpnclqfcshuhppbrhaiw.supabase.co";
 const SUPA_KEY = "sb_publishable_7kMPJ5D_MfqY9piihSxVSg_jWjRQv1U";
 const supa = supabase.createClient(SUPA_URL, SUPA_KEY);
 
-let __gameCode    = null;  // code de la partie en cours
-let __myPlayerId  = null;  // id du joueur local
-let __isHost      = false; // est-ce que je suis l'hôte ?
-let __realtimeSub = null;  // abonnement realtime
-let __isSyncing   = false; // évite les boucles de sync
+let __gameCode    = null;
+let __isHost      = false;
+let __channel     = null;
+let __isSyncing   = false;
+let __connectedPlayers = 0; // nb de joueurs connectés (hors hôte)
 
 // Générer un code de partie à 4 lettres
 function genCode() {
   return Array.from({length:4}, () => "ABCDEFGHJKLMNPQRSTUVWXYZ"[Math.floor(Math.random()*23)]).join("");
 }
 
-// Sauvegarder l'état complet dans Supabase (sans les données UI locales)
-async function syncToCloud() {
-  if (!__gameCode || __isSyncing || !__isHost) return; // seul l'hôte sync l'état principal
-  const toSync = JSON.parse(JSON.stringify(state));
-  delete toSync.lobby; // ne pas partager les données locales
-  await supa.from("games").upsert({ code: __gameCode, state: toSync, updated_at: new Date().toISOString() });
+// Broadcaster l'état à tous les autres (via Broadcast — pas besoin de réplication)
+function broadcastState() {
+  if (!__channel || !__isHost || __isSyncing) return;
+  const toSend = JSON.parse(JSON.stringify(state));
+  delete toSend.lobby;
+  __channel.send({ type: "broadcast", event: "state", payload: toSend });
 }
 
-// Charger l'état depuis Supabase (côté non-hôte uniquement)
-async function loadFromCloud(remoteState) {
-  if (!remoteState || __isHost) return;
-  __isSyncing = true;
-  const lobby = state.lobby; // préserver les données locales
-  Object.keys(remoteState).forEach(k => { state[k] = remoteState[k]; });
-  state.lobby = lobby;
-  render();
-  __isSyncing = false;
+// Rejoindre le channel Supabase Broadcast
+function joinChannel(code) {
+  if (__channel) supa.removeChannel(__channel);
+  __channel = supa.channel("game-" + code, { config: { broadcast: { self: false } } });
+
+  // L'hôte reçoit les "pings" des joueurs qui rejoignent
+  __channel.on("broadcast", { event: "ping" }, () => {
+    __connectedPlayers++;
+    render();
+    // Envoie l'état actuel au nouveau joueur
+    broadcastState();
+  });
+
+  // Les non-hôtes reçoivent l'état de l'hôte
+  __channel.on("broadcast", { event: "state" }, ({ payload }) => {
+    if (__isHost || !payload) return;
+    __isSyncing = true;
+    const lobby = state.lobby;
+    Object.keys(payload).forEach(k => { state[k] = payload[k]; });
+    state.lobby = lobby;
+    __isSyncing = false;
+    render();
+  });
+
+  __channel.subscribe(status => {
+    if (status === "SUBSCRIBED" && !__isHost) {
+      // Signaler à l'hôte qu'on est là
+      setTimeout(() => {
+        __channel.send({ type: "broadcast", event: "ping", payload: {} });
+      }, 500);
+    }
+  });
 }
 
-// S'abonner aux changements en temps réel
-function subscribeRealtime(code) {
-  if (__realtimeSub) supa.removeChannel(__realtimeSub);
-  __realtimeSub = supa.channel("game-" + code)
-    .on("postgres_changes", { event: "*", schema: "public", table: "games", filter: "code=eq." + code },
-      payload => {
-        if (payload.new && payload.new.state) loadFromCloud(payload.new.state);
-      })
-    .subscribe();
-}
-
-// Créer une nouvelle partie en ligne
+// Créer une nouvelle partie
 async function createOnlineGame() {
   const code = genCode();
-  __gameCode   = code;
-  __isHost     = true;
-  const toSync = JSON.parse(JSON.stringify(state));
-  delete toSync.lobby;
-  const { error } = await supa.from("games").insert({ code, state: toSync });
-  if (error) { alert("Erreur création partie : " + error.message); return; }
-  subscribeRealtime(code);
+  __gameCode = code;
+  __isHost   = true;
+  __connectedPlayers = 0;
+  joinChannel(code);
   return code;
 }
 
 // Rejoindre une partie existante
-async function joinOnlineGame(code) {
-  const { data, error } = await supa.from("games").select("state").eq("code", code).single();
-  if (error || !data) { alert("Code introuvable. Vérifie le code et réessaie."); return false; }
+function joinOnlineGame(code) {
   __gameCode = code;
   __isHost   = false;
-  subscribeRealtime(code);
-  // Charge l'état sans écraser les données locales
-  __isSyncing = true;
-  const remote = data.state;
-  Object.keys(remote).forEach(k => { if (k !== "lobby") state[k] = remote[k]; });
-  __isSyncing = false;
+  joinChannel(code);
   return true;
 }
-
-// Patch : toutes les actions appellent syncToCloud à la fin
-const __origRender = window.render;
 
 // ── Utilities ─────────────────────────────
 
@@ -389,8 +388,8 @@ function render() {
     const el = document.querySelector(`[data-focus="${focus.key}"]`);
     if (el) { el.focus(); try { el.setSelectionRange(focus.start, focus.start); } catch (e) {} }
   }
-  // Sync cloud après chaque render (sauf pendant la sync elle-même)
-  if (__gameCode && !__isSyncing) syncToCloud();
+  // Broadcast l'état à tous après chaque action (hôte seulement)
+  if (__gameCode && !__isSyncing) broadcastState();
 }
 
 function iconToken(icon, label, value) {
@@ -702,22 +701,22 @@ function triggerBloodEffect(intense = false) {
 // ── Screen renderers ──────────────────────
 
 function renderLobby() {
-  const isHost = __isHost;
-  const code   = __gameCode || "----";
-  const players = state.lobby ? state.lobby.players || [] : [];
-  if (isHost) {
+  const code  = __gameCode || "----";
+  const total = __connectedPlayers + 1; // hôte + joueurs connectés
+  if (__isHost) {
     return `<div class="wrap" style="max-width:480px;margin:0 auto;padding-top:60px">
       <div class="card">
-        <div class="chip">Partie en ligne</div>
+        <div class="chip">Partie en ligne · Hôte</div>
         <div class="hero-title" style="font-size:42px;margin-top:16px">Code de la partie</div>
         <div style="font-family:'Bebas Neue',sans-serif;font-size:80px;letter-spacing:.12em;color:var(--gold);text-align:center;margin:20px 0">${code}</div>
-        <p class="mini" style="text-align:center;line-height:1.6">Partage ce code aux autres joueurs.<br>Attends qu'ils rejoignent, puis lance la partie.</p>
-        <div class="grid" style="margin-top:16px">
-          ${players.map(p => `<div class="pill"><span>${esc(p.name || "Joueur " + p.idx)}</span><span class="badge">Connecté</span></div>`).join("") || '<div class="mini" style="text-align:center;margin-top:8px">En attente des joueurs…</div>'}
+        <p class="mini" style="text-align:center;line-height:1.6">Partage ce code aux autres joueurs.</p>
+        <div class="pill" style="margin-top:16px;justify-content:center">
+          <span>${total} joueur${total > 1 ? "s" : ""} connecté${total > 1 ? "s" : ""}</span>
+          ${__connectedPlayers === 0 ? '<span class="mini">En attente…</span>' : '<span class="badge" style="color:var(--green)">✓ Prêt</span>'}
         </div>
         <div style="margin-top:20px">
           <button class="btn cyan" data-act="online-launch" style="width:100%">
-            Lancer la partie →
+            Lancer la partie (${total} joueur${total > 1 ? "s" : ""}) →
           </button>
         </div>
       </div>
@@ -725,13 +724,10 @@ function renderLobby() {
   } else {
     return `<div class="wrap" style="max-width:480px;margin:0 auto;padding-top:60px">
       <div class="card">
-        <div class="chip">Partie en ligne</div>
+        <div class="chip">Partie en ligne · Connecté</div>
         <div class="hero-title" style="font-size:36px;margin-top:16px">En attente du lancement…</div>
         <div style="font-family:'Bebas Neue',sans-serif;font-size:80px;letter-spacing:.12em;color:var(--gold);text-align:center;margin:20px 0">${code}</div>
         <p class="mini" style="text-align:center;line-height:1.6">Tu es connecté. L'hôte va lancer la partie.</p>
-        <div class="grid" style="margin-top:16px">
-          ${players.map(p => `<div class="pill"><span>${esc(p.name || "Joueur " + p.idx)}</span><span class="badge">Connecté</span></div>`).join("")}
-        </div>
       </div>
     </div>`;
   }
@@ -2357,42 +2353,33 @@ function startSetupAction() { state.mode = "multi"; state.playerCount = Math.max
 function startSoloAction()  { state.mode = "solo";  state.playerCount = 1; state.screen = "setup"; state.setupStep = 0; state.setupLock = false; initSetup(); render(); }
 function setPlayerCountAction(v) { state.playerCount = Number(v); }
 
-async function startOnlineAction() {
+function startOnlineAction() {
   state.mode = "multi";
   state.playerCount = Math.max(2, state.playerCount);
-  initSetup();
-  state.lobby = { isHost: true, players: [] };
+  state.lobby = {};
   state.screen = "lobby";
-  render();
-  const code = await createOnlineGame();
-  if (!code) return;
+  createOnlineGame().then(code => { if (code) render(); });
   render();
 }
 
-async function joinOnlineAction() {
+function joinOnlineAction() {
   const input = document.getElementById("join-code");
   const code  = (input ? input.value.trim().toUpperCase() : "");
   if (code.length !== 4) { alert("Entre un code à 4 lettres."); return; }
-  const ok = await joinOnlineGame(code);
-  if (!ok) return;
-  // Enregistre ce joueur comme non-hôte
-  state.lobby = { isHost: false, players: [] };
+  state.lobby = {};
   state.screen = "lobby";
+  joinOnlineGame(code);
   render();
 }
 
-async function onlineLaunchAction() {
+function onlineLaunchAction() {
   if (!__isHost) return;
   state.mode = "multi";
   state.screen = "setup";
   state.setupStep = 0;
   state.setupLock = false;
   initSetup();
-  render();
-  // Force la sync immédiate vers Supabase pour que les autres voient le changement
-  const toSync = JSON.parse(JSON.stringify(state));
-  delete toSync.lobby;
-  await supa.from("games").upsert({ code: __gameCode, state: toSync, updated_at: new Date().toISOString() });
+  render(); // broadcast automatique via render()
 }
 
 function setupNextAction() {
