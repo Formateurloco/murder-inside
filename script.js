@@ -2,8 +2,10 @@
    Murder Inside – script.js
    ══════════════════════════════════════════ */
 
+const CODE_VERSION = "20260408";
+ 
 // ── Data ──────────────────────────────────
-
+ 
 const CRIMINALS = [
   { key: "psychopathe",   name: "Psychopathe",   skill: "violence",   bonus: 2, passive: "Si le dé arme donne Tir, +2 munitions." },
   { key: "collectionneur",name: "Collectionneur", skill: "agilite",    bonus: 2, passive: "Ignore le premier échec contre une cible." },
@@ -11,23 +13,23 @@ const CRIMINALS = [
   { key: "hedoniste",     name: "Hédoniste",      skill: "discretion", bonus: 2, passive: "Relance possible si premier résultat Warning." },
   { key: "psychotique",   name: "Psychotique",    skill: "folie",      bonus: 2, passive: "+1 à main nue." }
 ];
-
+ 
 const SKILLS = { agilite: "Agilité", ruse: "Ruse", violence: "Violence", folie: "Folie", discretion: "Discrétion" };
-
+ 
 const MELEE_WEAPONS = [
   { name: "Couteau de stase",   evo6: "Lame spectrale" },
   { name: "Batte neuronale",    evo6: "Batte gravitationnelle" },
   { name: "Marteau d'osmium",   evo6: "Marteau fractal" },
   { name: "Poings augmentés",   evo6: "Poings quantiques" }
 ];
-
+ 
 const GUN_WEAPONS = [
   { name: "Pistolet semi-auto", evo6: "Pistolet quantique" },
   { name: "Fusil à pompe",      evo6: "Pompe à impulsion" },
   { name: "Sniper",             evo6: "Sniper à rail" },
   { name: "Mitraillette",       evo6: "Mitraillette plasma" }
 ];
-
+ 
 const QUESTS = [
   { id: "q1", name: "Mire froide",     skill: "ruse",       threshold: 16, hits: 3, effect: "+3 / -3",             failType: "hp",      failAmount: 1,
     story: "Depuis trois jours tu surveilles ta prochaine cible. Tu cartographies ses habitudes, ses angles morts, ses failles. Ce soir, tu passes à l'action — arme en main, instinct en éveil. Un coup propre ou rien." },
@@ -42,7 +44,7 @@ const QUESTS = [
   { id: "q6", name: "Main du discret", skill: "ruse",       threshold: 18, hits: 4, effect: "20 naturel = 2 dégâts",failType: "warning", failAmount: 2,
     story: "Un coup propre, sans témoin, sans trace. Tu choisis le moment avec une précision chirurgicale — ni trop tôt, ni trop tard. Quand ton arme parle enfin, personne ne t'a vu arriver. Personne ne te verra partir." }
 ];
-
+ 
 const TARGETS = {
   1: [
     { name: "STRIKER",      img: "striker.png",    skill: ["ruse"],       threshold: 10, hits: 3, fail: 2, xp: 3, desc: "Ruse + niveau d'une arme ≥ 10", story: "Ancien champion de boxe raté, Striker s'est reconverti dans les basses besognes après un scandale de matchs truqués. Rapide, calculateur, il frappe toujours en premier et ne pose jamais de questions." },
@@ -81,7 +83,7 @@ const TARGETS = {
     { name: "LOLA FÉROCE", img: "lola.png",     skill: ["discretion","ruse"],     threshold: 30, hits: 5, fail: 3, xp: 5, desc: "Discrétion + Ruse + niveau arme ≥ 30", story: "Ancienne protégée du Caïd, Lola l'a trahi pour bâtir son propre empire. Elle connaît tous les secrets de l'organisation — et s'en sert comme monnaie d'échange. La prédatrice la plus redoutée du milieu." }
   ]
 };
-
+ 
 const SOLO_EVENTS = [
   { name: "Interférence système", desc: "-2 au prochain d20.",           apply: p => { p.systemMinus2 = (p.systemMinus2 || 0) + 1; } },
   { name: "Patch d'urgence",      desc: "+1 PV immédiatement.",          apply: p => { p.hp = Math.min(p.maxHp, p.hp + 1); } },
@@ -91,14 +93,14 @@ const SOLO_EVENTS = [
   { name: "Chambre forte",        desc: "+1 ressource au choix.",        apply: p => { p.choiceRes += 1; } },
   { name: "Adrénaline noire",     desc: "+2 au prochain d20.",           apply: p => { p.systemPlus2 = (p.systemPlus2 || 0) + 1; } }
 ];
-
+ 
 const SOLO_ENEMY_AI = [
   { key: "counter_warning",  name: "Contre-feu",         desc: "À chaque échec contre cette cible : +1 Warning." },
   { key: "tax_data",         name: "Racket de données",  desc: "À chaque échec contre cette cible : -1 datacoin si possible." },
   { key: "adaptive_guard",   name: "Blindage adaptatif", desc: "Après chaque réussite partielle, le seuil augmente de +1." },
   { key: "first_hit_shield", name: "Bouclier réactif",   desc: "La première réussite contre cette cible inflige 0 dégât." }
 ];
-
+ 
 const SKILL_10_RANK_XP = {
   agilite:    [12, 8, 0, 0],
   ruse:       [10, 8, 5, 0],
@@ -106,7 +108,7 @@ const SKILL_10_RANK_XP = {
   folie:      [5, 10, 0, 0],
   discretion: [5, 0, 10, 0]
 };
-
+ 
 const DICE = {
   datacoin: ["0D","1D","2D","3D","4D","5D"],
   skill:    ["A","D","F","V","R","C?"],
@@ -115,9 +117,9 @@ const DICE = {
   mystery:  ["Compétence au choix","Arme au choix","2 PV","1 Warning","2 Munitions","Ressource au choix"],
   leader:   ["Double réussite","1 compétence au choix (tous)","1 arme/compétence au choix (tous)","+3 à tous les d20","2 PV (tous)","Ressource au choix (tous)"]
 };
-
+ 
 // ── State ─────────────────────────────────
-
+ 
 const state = {
   screen: "home", mode: "multi", playerCount: 2,
   setup: [], players: [], leader: 0,
@@ -132,161 +134,262 @@ const state = {
   seqPlayerIdx: 0, seqLocked: false,
   duel: null
 };
-
-// ── Supabase Multijoueur (polling) ───────────────────
-
+ 
+// ── Supabase Multijoueur ──────────────────────────────
+ 
 const SUPA_URL = "https://lpnclqfcshuhppbrhaiw.supabase.co";
 const SUPA_KEY = "sb_publishable_7kMPJ5D_MfqY9piihSxVSg_jWjRQv1U";
 const supa = supabase.createClient(SUPA_URL, SUPA_KEY);
-
+ 
 let __gameCode         = null;
 let __isHost           = false;
-let __myIdx            = 0;      // 0 = hôte, 1+ = joueurs
+let __myIdx            = 0;
 let __pollInterval     = null;
-let __isSyncing        = false;
 let __connectedPlayers = 0;
-
-// Code à 4 lettres
+// Fiche locale — objet indépendant, jamais partagé avec state, jamais écrasé par le polling
+let __localForm        = null;
+let __localSubmitted   = false;
+let __isSyncing        = false;
+ 
+// ── localStorage ─────────────────────────────────────
+ 
+function saveSession() {
+  if (!__gameCode) return;
+  try { localStorage.setItem("murder_session", JSON.stringify({ code: __gameCode, myIdx: __myIdx, isHost: __isHost, ts: Date.now() })); } catch(e) {}
+}
+function clearSession() { try { localStorage.removeItem("murder_session"); } catch(e) {} }
+function getSavedSession() {
+  try {
+    const s = JSON.parse(localStorage.getItem("murder_session") || "null");
+    if (!s || !s.code || Date.now() - s.ts > 6 * 3600 * 1000) { clearSession(); return null; }
+    return s;
+  } catch(e) { return null; }
+}
+ 
+// ── Helpers ───────────────────────────────────────────
+ 
 function genCode() {
   return Array.from({length:4}, () => "ABCDEFGHJKLMNPQRSTUVWXYZ"[Math.floor(Math.random()*23)]).join("");
 }
-
-// Hôte : écrire l'état complet dans Supabase (async, silencieux)
-async function syncToCloud() {
-  if (!__gameCode || !__isHost || __isSyncing) return;
-  try {
-    await supa.from("games").upsert(
-      { code: __gameCode, host_state: JSON.parse(JSON.stringify(state)), updated_at: new Date().toISOString() },
-      { onConflict: "code" }
-    );
-  } catch(e) {}
-}
-
-// Appelé par render() — déclenche la sync en arrière-plan
-function broadcastState() { syncToCloud(); }
-
-// Arrêter le polling
 function stopPolling() {
   if (__pollInterval) { clearInterval(__pollInterval); __pollInterval = null; }
 }
-
-// Démarrer le polling toutes les 1,5 s
+ 
+// ── Sync hôte → Supabase ──────────────────────────────
+ 
+async function syncToCloud() {
+  if (!__gameCode || !__isHost || __isSyncing) return;
+  __isSyncing = true;
+  try {
+    const { error } = await supa.from("games")
+      .update({ host_state: JSON.parse(JSON.stringify(state)) })
+      .eq("code", __gameCode);
+    if (error) console.error("[sync]", error.message);
+  } finally {
+    __isSyncing = false;
+  }
+}
+function broadcastState() { return syncToCloud(); }
+ 
+function getOnlineSheetsStatus(joined, expectedCount = state.playerCount) {
+  const sheets = sheetsFromJoined(joined);
+  const missing = [];
+  for (let i = 0; i < expectedCount; i++) {
+    if (i === 0) {
+      if (!__localSubmitted || !__localForm) missing.push(i);
+    } else if (!sheets[String(i)]) {
+      missing.push(i);
+    }
+  }
+  return {
+    sheets,
+    missing,
+    everyoneReady: missing.length === 0
+  };
+}
+ 
+function allSheetsReady(joined) {
+  const sheets = sheetsFromJoined(joined);
+  if (!__localSubmitted || !__localForm) return false;
+  for (let i = 1; i < state.playerCount; i++) {
+    if (!sheets[String(i)]) return false;
+  }
+  return true;
+}
+ 
+// ── Polling ───────────────────────────────────────────
+ 
+// Extraire les fiches soumises depuis joined : [{idx,sheet}]
+function sheetsFromJoined(joined) {
+  const sheets = {};
+  (Array.isArray(joined) ? joined : []).forEach(e => {
+    if (e && typeof e === "object" && e.sheet) sheets[String(e.idx)] = e.sheet;
+  });
+  return sheets;
+}
+// Liste des idx connectés (nombres simples ou objets)
+function idxFromJoined(joined) {
+  return (Array.isArray(joined) ? joined : []).map(e => typeof e === "object" ? e.idx : e).filter(e => typeof e === "number");
+}
+ 
 function startPolling(code) {
   stopPolling();
   __pollInterval = setInterval(async () => {
     try {
+      const { data, error } = await supa.from("games").select("host_state, joined").eq("code", code).single();
+      if (error || !data) return;
+ 
       if (__isHost) {
-        // Hôte : vérifier les connexions et les fiches soumises
-        const { data } = await supa.from("games").select("joined, submissions").eq("code", code).single();
-        if (!data) return;
-
-        const joined    = Array.isArray(data.joined) ? data.joined : [];
-        const newCount  = joined.filter(i => i !== 0).length;
-        let needRender  = newCount !== __connectedPlayers;
-        if (needRender) __connectedPlayers = newCount;
-
-        const submissions = data.submissions || {};
-        Object.keys(submissions).forEach(idx => {
-          const i = Number(idx);
-          if (i > 0 && state.setup[i]) {
-            const sub = submissions[idx];
-            if (JSON.stringify(state.setup[i]) !== JSON.stringify(sub)) {
-              Object.assign(state.setup[i], sub);
-              needRender = true;
-            }
+        // Hôte : compter les connectés + lire les fiches soumises
+        const connectedIdxs = idxFromJoined(data.joined);
+        const newCount = connectedIdxs.filter(i => i !== 0).length;
+        let changed = newCount !== __connectedPlayers;
+        __connectedPlayers = newCount;
+ 
+        const sheets = sheetsFromJoined(data.joined);
+        Object.keys(sheets).forEach(idxStr => {
+          const i = Number(idxStr);
+          if (i === 0) return; // fiche hôte = __localForm, gérée localement
+          const incoming = sheets[idxStr];
+          if (incoming && JSON.stringify(state.setup[i]) !== JSON.stringify(incoming)) {
+            state.setup[i] = incoming;
+            changed = true;
           }
         });
-        if (needRender) render();
 
+        // Vérifier si tout le monde est prêt (pour afficher bouton chez l'hôte)
+        const wasReady = state.__allReady || false;
+        const nowReady = allSheetsReady(data.joined);
+        if (nowReady !== wasReady) { state.__allReady = nowReady; changed = true; }
+
+        if (changed) render();
+ 
       } else {
-        // Non-hôte : lire l'état de l'hôte et l'appliquer
-        const { data } = await supa.from("games").select("host_state").eq("code", code).single();
-        if (!data || !data.host_state || typeof data.host_state !== "object") return;
+        // Non-hôte : appliquer host_state sauf mon slot setup
+        if (!data.host_state) return;
         const hs = data.host_state;
-
-        __isSyncing = true;
-        const myIdx   = __myIdx;
-        const mySetup = (state.screen === "setup" && state.setup && state.setup[myIdx])
-          ? JSON.parse(JSON.stringify(state.setup[myIdx])) : null;
-
+        const myIdx = __myIdx;
+ 
+        // Appliquer tout le host_state — __localForm est complètement séparé de state
         Object.keys(hs).forEach(k => { state[k] = hs[k]; });
+        // __localForm n'est jamais touché par le polling
+ 
         __myIdx = myIdx;
-
-        // Conserver la fiche locale pendant la phase de setup
-        if (mySetup && state.screen === "setup" && state.setup && state.setup[myIdx]) {
-          state.setup[myIdx] = mySetup;
-        }
-        __isSyncing = false;
+        saveSession();
         render();
       }
-    } catch(e) {}
-  }, 1500);
+    } catch(e) { console.error("[poll]", e); }
+  }, 2000);
 }
-
-// Créer une nouvelle partie (hôte)
+ 
+// ── Créer / Rejoindre ─────────────────────────────────
+ 
 async function createOnlineGame() {
   const code = genCode();
   __gameCode = code;
   __isHost   = true;
   __myIdx    = 0;
-  __connectedPlayers = 0;
-  try {
-    await supa.from("games").insert({
-      code,
-      host_state: JSON.parse(JSON.stringify(state)),
-      joined: [0],
-      submissions: {}
-    });
-  } catch(e) {}
+  const stateSnap = JSON.parse(JSON.stringify(state));
+  stateSnap.__codeVersion = CODE_VERSION;
+  const { error } = await supa.from("games").insert({
+    code,
+    host_state: stateSnap,
+    joined: [0]
+  });
+  if (error) { alert("Erreur création partie : " + error.message); return null; }
+  saveSession();
   startPolling(code);
   return code;
 }
-
-// Rejoindre une partie existante
+ 
 async function joinOnlineGame(code) {
   try {
-    const { data, error } = await supa.from("games")
-      .select("joined, host_state").eq("code", code).single();
+    const { data, error } = await supa.from("games").select("host_state, joined").eq("code", code).single();
     if (error || !data) { alert("Code invalide ou partie introuvable."); return false; }
 
-    const joined = Array.isArray(data.joined) ? data.joined : [0];
-    // Trouver le prochain index libre
+    // Vérification de version
+    const hostVersion = data.host_state && data.host_state.__codeVersion;
+    if (hostVersion && hostVersion !== CODE_VERSION) {
+      alert(`⚠️ Mise à jour requise !\n\nL'hôte a la version ${hostVersion} du jeu.\nTu as la version ${CODE_VERSION}.\n\nDemande à l'hôte de t'envoyer les derniers fichiers (script.js + index.html).`);
+      return false;
+    }
+
+    // Trouver le prochain idx libre
+    const taken = idxFromJoined(data.joined);
     let idx = 1;
-    while (joined.includes(idx)) idx++;
+    while (taken.includes(idx)) idx++;
+ 
     __myIdx    = idx;
     __gameCode = code;
     __isHost   = false;
-
+ 
     // S'inscrire dans joined
-    await supa.from("games").update({ joined: [...joined, idx] }).eq("code", code);
-
-    // Appliquer l'état initial de l'hôte
-    if (data.host_state && typeof data.host_state === "object") {
-      __isSyncing = true;
+    const newJoined = [...(data.joined || []), idx];
+    await supa.from("games").update({ joined: newJoined }).eq("code", code);
+ 
+    // Appliquer host_state
+    if (data.host_state) {
       Object.keys(data.host_state).forEach(k => { state[k] = data.host_state[k]; });
-      __myIdx     = idx; // restaurer après écrasement
-      __isSyncing = false;
+      __myIdx = idx;
+      // Deep clone — __localForm est complètement indépendant de state
+      __localForm = JSON.parse(JSON.stringify(state.setup[idx] || makePlayer(idx)));
+      __localSubmitted = false;
     }
-
+ 
+    saveSession();
     startPolling(code);
     return true;
   } catch(e) {
-    alert("Erreur de connexion : " + (e.message || e));
+    alert("Erreur : " + (e.message || e));
     return false;
   }
 }
-
+ 
+// ── Abandon / Restauration ────────────────────────────
+ 
+function abandonSession() {
+  stopPolling();
+  clearSession();
+  __gameCode = null; __isHost = false; __myIdx = 0; __localForm = null; __localSubmitted = false; __connectedPlayers = 0;
+  Object.assign(state, {
+    screen: "home", mode: "multi", playerCount: 2,
+    setup: [], players: [], leader: 0,
+    phase: "draft", pool: [], draftOrder: [], draftStep: 0,
+    actionChoice: null, log: [], lockScreen: null, privateView: null,
+    setupStep: 0, setupLock: false, draftLocked: false,
+    seqPlayerIdx: 0, seqLocked: false, duel: null
+  });
+  render();
+}
+ 
+async function restoreSession(s) {
+  try {
+    const { data, error } = await supa.from("games").select("host_state, joined").eq("code", s.code).single();
+    if (error || !data || !data.host_state) { clearSession(); render(); return; }
+    __gameCode = s.code; __myIdx = s.myIdx; __isHost = s.isHost;
+    Object.keys(data.host_state).forEach(k => { state[k] = data.host_state[k]; });
+    __myIdx = s.myIdx;
+    if (!s.isHost) {
+      const sheets = sheetsFromJoined(data.joined);
+      const saved = sheets[String(s.myIdx)];
+      if (saved) { state.setup[s.myIdx] = saved; __localForm = saved; }
+    }
+    startPolling(s.code);
+    render();
+  } catch(e) { clearSession(); render(); }
+}
+ 
 // ── Utilities ─────────────────────────────
-
+ 
 function esc(s) {
   return String(s ?? "").replace(/[&<>"']/g, m => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[m]));
 }
 function sh(a)   { return [...a].sort(() => Math.random() - 0.5); }
 function pick(a) { return a[Math.floor(Math.random() * a.length)]; }
 function addLog(s) { state.log.unshift(s); state.log = state.log.slice(0, 60); }
-
+ 
 // ── Player factory ────────────────────────
-
+ 
 function makePlayer(i) {
   const c = CRIMINALS[i % CRIMINALS.length];
   const skills = { agilite: 0, ruse: 0, violence: 0, folie: 0, discretion: 0 };
@@ -315,13 +418,13 @@ function makePlayer(i) {
     targetReady: false, questReadyThisTurn: false
   };
 }
-
+ 
 function stage(p) {
   if (p.kills2 >= 3) return "boss";
   if (p.kills1 >= 3) return 2;
   return 1;
 }
-
+ 
 function buildOrder() {
   const n = state.players.length, f = state.leader, fw = [], bw = [], o = [];
   for (let i = 0; i < n; i++) fw.push((f + i) % n);
@@ -330,7 +433,7 @@ function buildOrder() {
   bw.forEach(i => o.push(i));
   return o;
 }
-
+ 
 function maybeAwardSkill10Xp(p) {
   for (const skill of Object.keys(SKILLS)) {
     if ((p.skills[skill] || 0) >= 10 && !p.skill10Awarded[skill]) {
@@ -347,11 +450,11 @@ function maybeAwardSkill10Xp(p) {
     }
   }
 }
-
+ 
 // ── Game init ─────────────────────────────
-
+ 
 function initSetup() { state.setup = Array.from({ length: state.playerCount }, (_, i) => makePlayer(i)); }
-
+ 
 function initGame() {
   state.players = state.setup.map(p => {
     const x = JSON.parse(JSON.stringify(p));
@@ -366,7 +469,7 @@ function initGame() {
   state.log    = [];
   addLog(`Premier joueur : ${state.players[state.leader].name}.`);
 }
-
+ 
 function applyModeEvent() {
   state.systemEvent = null;
   if (state.mode !== "solo") return;
@@ -377,7 +480,7 @@ function applyModeEvent() {
   ev.apply(p);
   addLog(`Événement du système : ${ev.name} — ${ev.desc}`);
 }
-
+ 
 function startTurn(first = false) {
   state.phase = "draft";
   state.draftLocked = true;
@@ -405,7 +508,7 @@ function startTurn(first = false) {
   applyModeEvent();
   if (!first) addLog(state.mode === "solo" ? "Nouveau tour solo." : `Nouveau tour. ${state.players[state.leader].name} devient premier joueur.`);
 }
-
+ 
 function checkGameOver() {
   const dead   = state.players.find(p => p.hp <= 0);
   const warned = state.players.find(p => p.warnings >= 10);
@@ -422,12 +525,12 @@ function checkGameOver() {
   }
   return false;
 }
-
+ 
 function effectiveXp(p) { return p.xp - p.warnings * 2; }
 function nextTurn() { state.leader = (state.leader + 1) % state.players.length; startTurn(); render(); }
-
+ 
 // ── Rendering ─────────────────────────────
-
+ 
 function render() {
   const app = document.getElementById("app");
   const ae  = document.activeElement;
@@ -442,9 +545,23 @@ function render() {
   } else if (state.setupLock && state.screen === "setup") {
     app.innerHTML = renderSetupLock();
   } else if (state.draftLocked && state.screen === "game" && state.phase === "draft") {
-    app.innerHTML = renderDraftLock();
+    if (__gameCode) {
+      const activeIdx = state.draftOrder[state.draftStep];
+      if (activeIdx !== __myIdx) {
+        app.innerHTML = renderOnlineWaiting(state.players[activeIdx], "choisit son dé…");
+      } else {
+        state.draftLocked = false;
+        app.innerHTML = renderGame();
+      }
+    } else {
+      app.innerHTML = renderDraftLock();
+    }
   } else if (inSeqPhase && state.seqLocked) {
-    app.innerHTML = renderSeqLock();
+    if (__gameCode) {
+      app.innerHTML = renderGame(); // pas de "passe l'appareil" en mode en ligne
+    } else {
+      app.innerHTML = renderSeqLock();
+    }
   } else {
     app.innerHTML = state.screen === "home"  ? renderHome()
                   : state.screen === "setup" ? renderSetup()
@@ -455,41 +572,41 @@ function render() {
     if (el) { el.focus(); try { el.setSelectionRange(focus.start, focus.start); } catch (e) {} }
   }
   // Broadcast l'état à tous après chaque action (hôte seulement)
-  if (__gameCode && !__isSyncing) broadcastState();
+  if (__gameCode && __isHost && !__isSyncing) broadcastState();
 }
-
+ 
 function iconToken(icon, label, value) {
   const ico = icon === "🪙"
     ? `<img src="images/datacoin.png" style="width:20px;height:20px;object-fit:contain;flex-shrink:0">`
     : `<span class="token-ico">${icon}</span>`;
   return `<div class="token">${ico}<div><div class="mini">${label}</div><div style="font-weight:800">${value}</div></div></div>`;
 }
-
+ 
 function renderHearts(current, max) {
   let s = '<div class="hearts">';
   for (let i = 0; i < max; i++) s += `<span class="heart ${i < current ? "" : "off"}">❤</span>`;
   return s + "</div>";
 }
-
+ 
 function renderSkulls(count) {
   let out = '<div class="row" style="gap:6px">';
   for (let i = 0; i < 3; i++) out += `<span style="font-size:18px;opacity:${i < count ? 1 : 0.28};filter:${i < count ? "none" : "grayscale(1)"}">☠</span>`;
   return out + "</div>";
 }
-
+ 
 function skillWithCrown(p, key) {
   return `${SKILLS[key]} ${(p.skills[key] || 0) >= 10 ? "👑" : ""}`;
 }
-
+ 
 function skillProgress(v) {
   const pct = Math.max(0, Math.min(100, (v / 10) * 100));
   return `<div class="progress-bar"><div class="progress-fill" style="width:${pct}%"></div></div>`;
 }
-
+ 
 function phaseClass() { return `phase-${state.phase}`; }
-
+ 
 // ── Audio ─────────────────────────────────
-
+ 
 let __audioCtx = null;
 function getAudioCtx() {
   try {
@@ -497,12 +614,12 @@ function getAudioCtx() {
     return __audioCtx;
   } catch (e) { return null; }
 }
-
+ 
 function unlockAudio() {
   const ctx = getAudioCtx();
   if (ctx && ctx.state === "suspended") ctx.resume().catch(() => {});
 }
-
+ 
 // ── Voix intro ────────────────────────────
 let __introSpoken = false;
 function speakIntro() {
@@ -522,13 +639,13 @@ function speakIntro() {
   if (speechSynthesis.getVoices().length > 0) doSpeak();
   else speechSynthesis.addEventListener("voiceschanged", doSpeak, { once: true });
 }
-
+ 
 // ── Musique procédurale ───────────────────
 let __musicNodes = [];
 let __currentMood = null;
 let __masterMute  = null;
 let __muted       = false;
-
+ 
 function getMasterMute() {
   if (__masterMute) return __masterMute;
   const ctx = getAudioCtx();
@@ -538,7 +655,7 @@ function getMasterMute() {
   __masterMute.connect(ctx.destination);
   return __masterMute;
 }
-
+ 
 function toggleMute() {
   __muted = !__muted;
   const mute = getMasterMute();
@@ -547,13 +664,13 @@ function toggleMute() {
   const btn = document.getElementById("btn-mute");
   if (btn) btn.textContent = __muted ? "🔇" : "🔊";
 }
-
+ 
 function stopMusic() {
   __musicNodes.forEach(n => { try { n.stop(); } catch(e){} try { n.disconnect(); } catch(e){} });
   __musicNodes = [];
   __currentMood = null;
 }
-
+ 
 function startMusic(mood) {
   if (__currentMood === mood) return;
   stopMusic();
@@ -561,13 +678,13 @@ function startMusic(mood) {
   const ctx = getAudioCtx();
   if (!ctx) return;
   if (ctx.state === "suspended") ctx.resume().catch(() => {});
-
+ 
   const master = ctx.createGain();
   master.gain.setValueAtTime(0, ctx.currentTime);
   master.gain.linearRampToValueAtTime(0.18, ctx.currentTime + 3);
   master.connect(getMasterMute());
   __musicNodes.push(master);
-
+ 
   if (mood === "ambient") {
     // ── Drone de fond très doux (sine, pas sawtooth) ──
     [36.7, 55, 73.4].forEach((freq, i) => {
@@ -579,7 +696,7 @@ function startMusic(mood) {
       osc.connect(g); g.connect(master);
       osc.start(); __musicNodes.push(osc, g);
     });
-
+ 
     // ── Nappe atmosphérique qui respire (triangle filtré) ──
     [110, 164.8].forEach((freq, i) => {
       const osc  = ctx.createOscillator();
@@ -597,7 +714,7 @@ function startMusic(mood) {
       lfo.start(); osc.start();
       __musicNodes.push(osc, filt, g, lfo, lg);
     });
-
+ 
     // ── Bruit très filtré — souffle lointain ──
     const bufSize = ctx.sampleRate * 4;
     const buf  = ctx.createBuffer(1, bufSize, ctx.sampleRate);
@@ -610,7 +727,7 @@ function startMusic(mood) {
     const ng = ctx.createGain(); ng.gain.value = 0.025;
     noise.connect(f1); f1.connect(f2); f2.connect(ng); ng.connect(master);
     noise.start(); __musicNodes.push(noise, f1, f2, ng);
-
+ 
     // ── Volume qui respire très lentement ──
     const lfo = ctx.createOscillator();
     const lg  = ctx.createGain();
@@ -618,7 +735,7 @@ function startMusic(mood) {
     lg.gain.value = 0.04;
     lfo.connect(lg); lg.connect(master.gain);
     lfo.start(); __musicNodes.push(lfo, lg);
-
+ 
     // ── Pulsation cardiaque douce et espacée ──
     function heartbeat() {
       if (__currentMood !== "ambient") return;
@@ -640,7 +757,7 @@ function startMusic(mood) {
       setTimeout(heartbeat, 2800 + Math.random() * 1200);
     }
     setTimeout(heartbeat, 2000);
-
+ 
   } else if (mood === "attack") {
     // ── Drone tendu mais doux (triangle+sine) ──
     [55, 58.3, 82.4].forEach((freq, i) => {
@@ -655,7 +772,7 @@ function startMusic(mood) {
       osc.connect(filt); filt.connect(g); g.connect(master);
       osc.start(); __musicNodes.push(osc, filt, g);
     });
-
+ 
     // ── Battement cardiaque qui s'accélère doucement ──
     let beatInterval = 700;
     function stressBeat() {
@@ -679,7 +796,7 @@ function startMusic(mood) {
       setTimeout(stressBeat, beatInterval);
     }
     setTimeout(stressBeat, 200);
-
+ 
     // ── Nappes montantes très douces ──
     [138, 146.8, 196].forEach((freq, i) => {
       const osc  = ctx.createOscillator();
@@ -699,7 +816,7 @@ function startMusic(mood) {
     });
   }
 }
-
+ 
 // Déclenche la musique et la voix au premier clic
 let __firstInteraction = false;
 document.addEventListener("click", function onFirst() {
@@ -708,7 +825,7 @@ document.addEventListener("click", function onFirst() {
   speakIntro();
   setTimeout(() => startMusic("ambient"), 3200); // après la voix
 }, { once: false });
-
+ 
 function playTone(freq = 220, duration = 0.08, type = "sawtooth", volume = 0.03) {
   try {
     const ctx = getAudioCtx();
@@ -727,7 +844,7 @@ function playTone(freq = 220, duration = 0.08, type = "sawtooth", volume = 0.03)
     osc.stop(ctx.currentTime + duration);
   } catch (e) {}
 }
-
+ 
 function playRollSound(success) {
   if (success) {
     playTone(420, 0.05, "square",   0.025);
@@ -737,7 +854,7 @@ function playRollSound(success) {
     setTimeout(() => playTone(90,  0.12, "sawtooth", 0.035), 60);
   }
 }
-
+ 
 function triggerBloodEffect(intense = false) {
   const overlay = document.getElementById("bloodOverlay");
   const flash   = document.getElementById("screenFlash");
@@ -763,13 +880,15 @@ function triggerBloodEffect(intense = false) {
   setTimeout(() => document.body.classList.remove("shake"), 280);
   setTimeout(() => overlay.classList.remove("show"), 380);
 }
-
+ 
 // ── Screen renderers ──────────────────────
-
+ 
 function renderLobby() {
-  const code  = __gameCode || "----";
-  const total = __connectedPlayers + 1; // hôte + joueurs connectés
+  const code = __gameCode || "----";
   if (__isHost) {
+  {
+    const total = __connectedPlayers + 1; // hôte + joueurs connectés
+    const allConnected = total >= state.playerCount;
     return `<div class="wrap" style="max-width:480px;margin:0 auto;padding-top:60px">
       <div class="card">
         <div class="chip">Partie en ligne · Hôte</div>
@@ -777,33 +896,44 @@ function renderLobby() {
         <div style="font-family:'Bebas Neue',sans-serif;font-size:80px;letter-spacing:.12em;color:var(--gold);text-align:center;margin:20px 0">${code}</div>
         <p class="mini" style="text-align:center;line-height:1.6">Partage ce code aux autres joueurs.</p>
         <div class="pill" style="margin-top:16px;justify-content:center">
-          <span>${total} joueur${total > 1 ? "s" : ""} connecté${total > 1 ? "s" : ""}</span>
-          ${__connectedPlayers === 0 ? '<span class="mini">En attente…</span>' : '<span class="badge" style="color:var(--green)">✓ Prêt</span>'}
+          <span>${total} / ${state.playerCount} joueur${state.playerCount > 1 ? "s" : ""} connecté${total > 1 ? "s" : ""}</span>
+          ${allConnected ? '<span class="badge" style="color:var(--green)">✓ Tout le monde est là</span>' : '<span class="mini" style="opacity:.6">En attente…</span>'}
         </div>
         <div style="margin-top:20px">
-          <button class="btn cyan" data-act="online-launch" style="width:100%"
-            ${total < state.playerCount ? "disabled" : ""}>
-            ${total < state.playerCount
-              ? `En attente… (${total}/${state.playerCount})`
-              : `Lancer la partie (${total} joueurs) →`}
+          <button class="btn cyan" data-act="online-launch" style="width:100%" ${allConnected ? "" : "disabled"}>
+            ${allConnected ? "Lancer la création de profils →" : `En attente… (${total}/${state.playerCount})`}
           </button>
+          <button class="btn outline" data-act="abandon-session" style="width:100%;margin-top:8px">Abandonner la partie</button>
         </div>
       </div>
     </div>`;
+  }
   } else {
     return `<div class="wrap" style="max-width:480px;margin:0 auto;padding-top:60px">
       <div class="card">
-        <div class="chip">Partie en ligne · Connecté</div>
+        <div class="chip">Partie en ligne · Connecté · Joueur ${__myIdx + 1}</div>
         <div class="hero-title" style="font-size:36px;margin-top:16px">En attente du lancement…</div>
         <div style="font-family:'Bebas Neue',sans-serif;font-size:80px;letter-spacing:.12em;color:var(--gold);text-align:center;margin:20px 0">${code}</div>
-        <p class="mini" style="text-align:center;line-height:1.6">Tu es connecté. L'hôte va lancer la partie.</p>
+        <p class="mini" style="text-align:center;line-height:1.6">Tu es connecté. L'hôte va lancer la création de profils.</p>
+        <button class="btn outline" data-act="abandon-session" style="width:100%;margin-top:8px">Quitter la partie</button>
       </div>
     </div>`;
   }
 }
-
+ 
 function renderHome() {
+  const saved = getSavedSession();
+  const resumeBanner = saved ? `
+    <div class="note" style="margin-bottom:16px;border-color:var(--gold)">
+      <strong style="color:var(--gold)">Partie en cours détectée — Code ${saved.code}</strong>
+      <div class="mini" style="margin-top:6px">Tu étais ${saved.isHost ? "l'hôte" : "le joueur " + (saved.myIdx + 1)}.</div>
+      <div class="row" style="margin-top:10px;gap:8px">
+        <button class="btn cyan" data-act="resume-session">Reprendre la partie →</button>
+        <button class="btn outline" data-act="abandon-session">Abandonner</button>
+      </div>
+    </div>` : "";
   return `<div class="wrap">
+    ${resumeBanner}
     <div class="hero-grid">
       <div class="card">
         <div class="chip">Murder Inside · Dossier criminel</div>
@@ -811,21 +941,21 @@ function renderHome() {
         <p style="margin-top:18px" class="hero-sub">
           Un jeu de rôle criminel où chaque décision laisse une trace. Choisis ton mode et le nombre de joueurs.
         </p>
-
+ 
         <div class="section-card" style="margin-top:20px">
           <div class="label-top">Partie multijoueur · 2 à 4 joueurs</div>
           <p class="mini" style="margin-top:8px;line-height:1.55">Chaque joueur crée son profil sur cet appareil, puis le passe au suivant. Quêtes, cibles, montée en puissance.</p>
           <div class="row" style="margin-top:14px;align-items:center">
             <div>
               <div class="mini" style="margin-bottom:6px">Nombre de joueurs</div>
-              <select class="select" id="player-count-home" style="width:130px">
+              <select class="select" id="player-count-local" style="width:130px">
                 ${[2,3,4].map(n => `<option value="${n}" ${n === state.playerCount ? "selected" : ""}>${n} joueurs</option>`).join("")}
               </select>
             </div>
             <button class="btn cyan" data-act="start-setup" style="align-self:flex-end">Commencer →</button>
           </div>
         </div>
-
+ 
         <div class="section-card" style="margin-top:12px">
           <div class="label-top">Mode solo · Contre le système</div>
           <p class="mini" style="margin-top:8px;line-height:1.55">Un événement système se déclenche à chaque tour. Pression maximale, aucune aide.</p>
@@ -833,14 +963,14 @@ function renderHome() {
             <button class="btn pink" data-act="start-solo">Mode solo →</button>
           </div>
         </div>
-
+ 
         <div class="section-card" style="margin-top:12px">
           <div class="label-top">Mode en ligne · Chacun sur son écran</div>
           <p class="mini" style="margin-top:8px;line-height:1.55">Crée une partie et partage le code. Chaque joueur joue depuis son propre appareil en temps réel.</p>
           <div class="grid" style="margin-top:14px;gap:10px">
             <div>
               <div class="mini" style="margin-bottom:6px">Nombre de joueurs</div>
-              <select class="select" id="player-count-home" style="width:130px">
+              <select class="select" id="player-count-online" style="width:130px">
                 ${[2,3,4].map(n => `<option value="${n}" ${n === state.playerCount ? "selected" : ""}>${n} joueurs</option>`).join("")}
               </select>
             </div>
@@ -873,6 +1003,7 @@ function renderHome() {
         </div>
       </div>
     </div>
+    <div style="text-align:center;margin-top:16px;font-size:10px;opacity:.35;letter-spacing:.05em">v${CODE_VERSION}</div>
   </div>`;
 }
 
@@ -880,29 +1011,51 @@ function renderSetup() {
   // Mode en ligne : chaque appareil remplit sa propre fiche
   if (__gameCode) {
     const i = __myIdx;
-    const p = state.setup[i];
+    // Lire TOUJOURS depuis __localForm — jamais depuis state.setup qui peut être écrasé par le polling
+    const p = __localForm;
     if (!p) return `<div class="wrap"><div class="card"><p class="mini">Chargement…</p></div></div>`;
-    const myReady = p.name.trim() && p.chosen.length === 3;
-    const allReady = state.setup.every(x => x.name.trim() && x.chosen.length === 3);
+ 
+    const myReady = !!(p.name && p.name.trim() && p.chosen && p.chosen.length === 3);
+    const allReady = !!state.__allReady;
+
+    let bottomSection = "";
+    if (!__localSubmitted) {
+      if (!myReady) {
+        bottomSection = `<div class="note" style="margin-top:16px;text-align:center;color:var(--muted)">
+          Remplis ton surnom et choisis 3 quêtes pour pouvoir valider ton profil.
+        </div>`;
+      } else {
+        bottomSection = `<div class="row" style="margin-top:16px">
+          <button class="btn cyan" data-act="online-setup-ready" style="width:100%;font-size:16px">Valider mon profil ✓</button>
+        </div>`;
+      }
+    } else if (__isHost) {
+      if (allReady) {
+        bottomSection = `<div style="margin-top:16px">
+          <div class="note" style="text-align:center;margin-bottom:12px">✓ Tout le monde a validé son profil !</div>
+          <button class="btn cyan" data-act="online-launch-matrix" style="width:100%;font-size:18px;padding:14px">Rejoindre la matrice →</button>
+        </div>`;
+      } else {
+        bottomSection = `<div class="note" style="margin-top:16px;text-align:center">
+          ✓ Profil validé ! En attente des autres joueurs…
+        </div>`;
+      }
+    } else {
+      bottomSection = `<div class="note" style="margin-top:16px;text-align:center">
+        ✓ Profil validé ! En attente du lancement par l'hôte…
+      </div>`;
+    }
     return `<div class="wrap">
       <div class="card">
         <div class="chip">Joueur ${i + 1} · ${__isHost ? "Hôte" : "Connecté"}</div>
         <h2 style="margin-top:8px">Construis ton profil criminel</h2>
-        <p class="mini">Remplis ta fiche. L'hôte lancera la partie quand tout le monde sera prêt.</p>
+        <p class="mini">Remplis ta fiche et clique sur "Valider mon profil". L'hôte lancera la partie quand tout le monde sera prêt.</p>
       </div>
       <div style="margin-top:16px">${renderSetupPlayer(p, i)}</div>
-      ${myReady
-        ? `<div class="note" style="margin-top:16px;text-align:center">
-            ✓ Ton profil est prêt. Attends les autres joueurs.
-            ${__isHost && allReady ? `<div style="margin-top:12px"><button class="btn cyan" data-act="launch">Lancer la partie →</button></div>` : ""}
-            ${__isHost && !allReady ? `<div class="mini" style="margin-top:8px">En attente que tous les joueurs remplissent leur fiche…</div>` : ""}
-           </div>`
-        : `<div class="row" style="margin-top:16px">
-            <button class="btn cyan" data-act="online-setup-ready">Valider mon profil ✓</button>
-           </div>`}
+      ${bottomSection}
     </div>`;
   }
-
+ 
   // Mode local (passe-appareil) — comportement original
   const i    = state.setupStep;
   const p    = state.setup[i];
@@ -925,7 +1078,7 @@ function renderSetup() {
     </div>
   </div>`;
 }
-
+ 
 function renderSetupPlayer(p, i) {
   const c = CRIMINALS.find(x => x.key === p.criminal);
   return `<div class="card">
@@ -979,7 +1132,7 @@ function renderSetupPlayer(p, i) {
     </div>
   </div>`;
 }
-
+ 
 function renderSeqLock() {
   const p = state.players[state.seqPlayerIdx];
   if (!p) return renderGame();
@@ -999,7 +1152,7 @@ function renderSeqLock() {
     </div>
   </div>`;
 }
-
+ 
 function renderSetupLock() {
   const next = state.setup[state.setupStep];
   const label = next && next.name && next.name.trim() ? next.name : `Joueur ${state.setupStep + 1}`;
@@ -1013,7 +1166,19 @@ function renderSetupLock() {
     </div>
   </div>`;
 }
-
+ 
+function renderOnlineWaiting(p, action) {
+  const name = p ? esc(p.name) : "Un joueur";
+  return `<div class="lock-screen">
+    <div class="lock-content">
+      <div class="lock-icon">🎲</div>
+      <div class="lock-label">En attente…</div>
+      <div class="lock-name">${name}</div>
+      <p class="lock-hint">${action || "joue en ce moment…"}</p>
+    </div>
+  </div>`;
+}
+ 
 function renderDraftLock() {
   const idx = state.draftOrder[state.draftStep];
   const p   = state.players[idx];
@@ -1028,7 +1193,7 @@ function renderDraftLock() {
     </div>
   </div>`;
 }
-
+ 
 function renderLockScreen() {
   const p = state.players.find(x => x.id === state.lockScreen);
   if (!p) { state.lockScreen = null; return renderGame(); }
@@ -1045,7 +1210,7 @@ function renderLockScreen() {
     </div>
   </div>`;
 }
-
+ 
 function renderSummaryCard(p) {
   const completedQuests = p.chosen.filter(q => (p.questProgress[q.id] || 0) >= q.hits);
   return `<div class="card summary-card">
@@ -1062,7 +1227,7 @@ function renderSummaryCard(p) {
     </div>
   </div>`;
 }
-
+ 
 function renderPrivateView() {
   const p = state.players.find(x => x.id === state.privateView);
   if (!p) { state.privateView = null; return renderGame(); }
@@ -1076,7 +1241,7 @@ function renderPrivateView() {
     <div style="margin-top:16px">${renderPlayer(p, i)}</div>
   </div>`;
 }
-
+ 
 function renderPhaseFocus() {
   const texts = {
     draft:    ["Choix des dés",         "Choisis seulement les dés utiles à ton tour."],
@@ -1088,12 +1253,12 @@ function renderPhaseFocus() {
   const [title, sub] = texts[state.phase] || ["Murder Inside", ""];
   return `<div class="phase-focus"><div class="phase-title">${title}</div><div class="phase-sub">${sub}</div></div>`;
 }
-
+ 
 function renderGame() {
   const isSeq = state.phase === "roll";
   const activeP = isSeq ? state.players[state.seqPlayerIdx] : null;
   const activeI = isSeq ? state.seqPlayerIdx : -1;
-
+ 
   return `<div class="wrap ${phaseClass()}">
     <div class="grid g2">
       <div class="card">
@@ -1128,13 +1293,15 @@ function renderGame() {
       </div>
     </div>
     <div style="margin-top:16px">
-      ${isSeq && activeP
-        ? renderPlayer(activeP, activeI)
-        : `<div class="grid g2">${state.players.map((p, i) => renderPlayer(p, i)).join("")}</div>`}
+      ${__gameCode && state.phase !== "draft"
+        ? renderPlayer(state.players[__myIdx], __myIdx)
+        : isSeq && activeP
+          ? renderPlayer(activeP, activeI)
+          : `<div class="grid g2">${state.players.map((p, i) => renderPlayer(p, i)).join("")}</div>`}
     </div>
   </div>`;
 }
-
+ 
 function renderMain() {
   if (state.phase === "draft") {
     const idx = state.draftOrder[state.draftStep], p = state.players[idx];
@@ -1178,7 +1345,7 @@ function renderMain() {
       </div>
     </div>`;
   }
-
+ 
   if (state.phase === "roll") {
     return `<div style="margin-top:16px">
       <strong>Tours de jeu</strong>
@@ -1195,7 +1362,7 @@ function renderMain() {
         : ""}
     </div>`;
   }
-
+ 
   if (state.phase === "gameover") {
     const ranking = [...state.players].sort((a, b) => effectiveXp(b) - effectiveXp(a));
     return `<div style="margin-top:16px">
@@ -1206,25 +1373,35 @@ function renderMain() {
       </div>
     </div>`;
   }
-
+ 
   // action phase
+  // En mode en ligne, seul le leader choisit l'action si elle n'est pas encore choisie
+  const isLeaderOnline = !__gameCode || __myIdx === state.leader;
+  if (__gameCode && !state.actionChoice && !isLeaderOnline) {
+    return `<div style="margin-top:16px">
+      <strong>Action commune</strong>
+      <div class="note" style="margin-top:10px">
+        En attente du choix de l'action par <strong>${esc(state.players[state.leader]?.name || "le premier joueur")}</strong>…
+      </div>
+    </div>`;
+  }
   return `<div style="margin-top:16px">
     <strong>Action commune</strong>
     <div class="row" style="margin-top:10px">
-      <button class="btn pink"    data-act="choose-action" data-kind="quest"  ${state.actionChoice ? "disabled" : ""}>Quêtes</button>
-      <button class="btn cyan"    data-act="choose-action" data-kind="target" ${state.actionChoice ? "disabled" : ""}>Attaquer une cible</button>
-      ${state.mode !== "solo" && state.players.length > 1 ? `<button class="btn pink" data-act="choose-action" data-kind="duel" ${state.actionChoice ? "disabled" : ""}>Affaiblir un joueur</button>` : ""}
+      <button class="btn pink"    data-act="choose-action" data-kind="quest"  ${state.actionChoice || !isLeaderOnline ? "disabled" : ""}>Quêtes</button>
+      <button class="btn cyan"    data-act="choose-action" data-kind="target" ${state.actionChoice || !isLeaderOnline ? "disabled" : ""}>Attaquer une cible</button>
+      ${state.mode !== "solo" && state.players.length > 1 ? `<button class="btn pink" data-act="choose-action" data-kind="duel" ${state.actionChoice || !isLeaderOnline ? "disabled" : ""}>Affaiblir un joueur</button>` : ""}
       <button class="btn outline" data-act="end-turn">Fin du tour</button>
     </div>
     ${state.actionChoice === "duel" ? renderDuel() : ""}
   </div>`;
 }
-
+ 
 function renderLeaderChoiceBox() {
   const p = state.players[state.leader];
   if (!p || !p.rollPanel || p.rollPanel.kind !== "leaderChoice") return "";
   const face = p.rollPanel.face;
-
+ 
   if (face === "1 compétence au choix (tous)") {
     return `<div class="card" style="margin-top:12px">
       <strong>Dé premier joueur</strong>
@@ -1234,7 +1411,7 @@ function renderLeaderChoiceBox() {
       </div>
     </div>`;
   }
-
+ 
   if (face === "1 arme/compétence au choix (tous)") {
     return `<div class="card" style="margin-top:12px">
       <strong>Dé premier joueur</strong>
@@ -1246,7 +1423,7 @@ function renderLeaderChoiceBox() {
       </div>
     </div>`;
   }
-
+ 
   if (face === "Ressource au choix (tous)") {
     return `<div class="card" style="margin-top:12px">
       <strong>Dé premier joueur</strong>
@@ -1258,10 +1435,10 @@ function renderLeaderChoiceBox() {
       </div>
     </div>`;
   }
-
+ 
   return "";
 }
-
+ 
 function renderTarget() {
   if (state.actionChoice !== "target") {
     return `<div style="margin-top:16px" class="card target-frame hide-in-draft hide-in-roll hide-in-purchase">
@@ -1285,7 +1462,7 @@ function renderTarget() {
     </div>
   </div>`;
 }
-
+ 
 function renderPlayer(p, i) {
   const c          = CRIMINALS.find(x => x.key === p.criminal);
   const meleeObj   = MELEE_WEAPONS.find(x => x.name === p.melee) || { name: p.melee, evo6: "Évolution mk VI" };
@@ -1294,7 +1471,7 @@ function renderPlayer(p, i) {
   const rightLabel = p.gunBuilt3   ? gunObj.name   : "Main droite";
   const meleeStatus = p.meleeBuilt6 ? `Évolution : ${meleeObj.evo6}` : (p.meleeBuilt3 ? "Évolution dispo au palier 6" : "Construire au palier 3");
   const gunStatus   = p.gunBuilt6   ? `Évolution : ${gunObj.evo6}`   : (p.gunBuilt3   ? "Évolution dispo au palier 6" : "Construire au palier 3");
-
+ 
   return `<div class="card identity-card">
     ${renderRollButton(p)}
     ${renderRolled(p)}
@@ -1315,7 +1492,7 @@ function renderPlayer(p, i) {
         ${state.mode !== "solo" ? `<button class="btn outline" data-act="show-private" data-id="${p.id}" style="font-size:12px;padding:6px 10px">🔒 Ma feuille</button>` : ""}
       </div>
     </div>
-
+ 
     <div class="section-card" style="margin-top:14px">
       <div class="label-top">État vital</div>
       ${renderHearts(p.hp, p.maxHp)}
@@ -1330,7 +1507,7 @@ function renderPlayer(p, i) {
         <div class="note"><div class="mini">Cibles niveau 2</div>${renderSkulls(p.kills2)}</div>
       </div>
     </div>
-
+ 
     <div class="screen-grid" style="margin-top:14px">
       <div class="section-card">
         <div class="label-top">Profil criminel</div>
@@ -1348,7 +1525,7 @@ function renderPlayer(p, i) {
           ${Object.keys(SKILLS).map(k => `<button class="btn outline" data-act="boost-skill" data-id="${p.id}" data-skill="${k}">${SKILLS[k]}</button>`).join("")}
         </div>` : ""}
       </div>
-
+ 
       <div class="section-card">
         <div class="label-top">Arsenal</div>
         <div class="grid" style="margin-top:10px">
@@ -1371,18 +1548,18 @@ function renderPlayer(p, i) {
         </div>` : ""}
       </div>
     </div>
-
+ 
     <div class="resource-grid" style="margin-top:14px">
       ${iconToken("💿", "CD",       p.cds)}
       ${iconToken("🧵", "Bobines",  p.bobines)}
       ${iconToken("🔋", "Batteries",p.batteries)}
     </div>
-
+ 
     ${renderPurchasePanel(p)}
     ${renderQuests(p)}
   </div>`;
 }
-
+ 
 function renderRollButton(p) {
   if (state.phase !== "roll") return "";
   if (p.rolled.length > 0 && !p.rollPanel) return `
@@ -1405,7 +1582,7 @@ function renderRollButton(p) {
     </div>
   </div>`;
 }
-
+ 
 function renderRolled(p) {
   if (state.phase !== "roll" || !p.rolled.length) return "";
   return `<div class="card section-card" style="margin-top:12px">
@@ -1419,7 +1596,7 @@ function renderRolled(p) {
     </div>
   </div>`;
 }
-
+ 
 function renderTargetTop(p) {
   if (state.phase !== "action" || state.actionChoice !== "target") return "";
   if (p.rollPanel && (p.rollPanel.kind === "chooseTargetOptions" || p.rollPanel.kind === "chooseTarget")) {
@@ -1448,27 +1625,27 @@ function renderTargetTop(p) {
   }
   return "";
 }
-
+ 
 function renderPurchasePanel(p) {
   if (state.phase !== "roll" || !p.rolled.length) return "";
   return `<div class="card section-card" style="margin-top:12px">
     <div class="label-top">Gestion</div>
     <strong>Achat / ressources / constructions</strong>
-
+ 
     <div class="row" style="margin-top:10px">
       <button class="btn outline" data-act="buy" data-id="${p.id}" data-kind="pv">1 PV</button>
       <span class="mini">2 datacoins</span>
       <button class="btn outline" data-act="buy" data-id="${p.id}" data-kind="ammo">1 munition</button>
       <span class="mini">1 datacoin</span>
     </div>
-
+ 
     <div class="row" style="margin-top:10px">
       <button class="btn outline" data-act="buy" data-id="${p.id}" data-kind="res" data-res="cds">1 CD</button>
       <button class="btn outline" data-act="buy" data-id="${p.id}" data-kind="res" data-res="bobines">1 Bobine</button>
       <button class="btn outline" data-act="buy" data-id="${p.id}" data-kind="res" data-res="batteries">1 Batterie</button>
       <span class="mini">3 datacoins</span>
     </div>
-
+ 
     ${p.choiceRes ? `<div class="note" style="margin-top:10px">
       <div class="mini">Ressource(s) au choix disponible(s) : ${p.choiceRes}</div>
       <div class="row" style="margin-top:8px">
@@ -1477,7 +1654,7 @@ function renderPurchasePanel(p) {
         <button class="btn outline" data-act="choose-res" data-id="${p.id}" data-res="batteries">Prendre 1 Batterie</button>
       </div>
     </div>` : ""}
-
+ 
     <div class="screen-grid" style="margin-top:12px">
       <div class="note">
         <div><strong>Construire arme de poing</strong></div>
@@ -1502,7 +1679,7 @@ function renderPurchasePanel(p) {
         </div>
       </div>
     </div>
-
+ 
     ${state.players.indexOf(p) === state.leader && !state.actionChoice ? `
     <div class="section-card" style="margin-top:14px">
       <div class="label-top">Choix de l'action du tour</div>
@@ -1517,7 +1694,7 @@ function renderPurchasePanel(p) {
     <div class="note" style="margin-top:12px">
       Action du tour choisie : <strong>${{ target: "Attaquer une cible", quest: "Faire les quêtes", duel: "Affaiblir un joueur" }[state.actionChoice] || state.actionChoice}</strong>
     </div>` : ""}
-
+ 
     <div style="margin-top:12px">
       <button class="btn green" data-act="done-purchase" data-id="${p.id}"
         ${p.done ? "disabled" : (state.players.indexOf(p) === state.leader && !state.actionChoice ? "disabled" : "")}>
@@ -1528,7 +1705,7 @@ function renderPurchasePanel(p) {
     </div>
   </div>`;
 }
-
+ 
 function renderQuests(p) {
   return `<div class="card section-card hide-in-draft" style="margin-top:12px">
     <div class="label-top">Quêtes personnelles</div>
@@ -1551,7 +1728,7 @@ function renderQuests(p) {
     </div>
   </div>`;
 }
-
+ 
 function renderPowerPanel(p) {
   if (state.phase !== "action" || !p.rollPanel || p.rollPanel.kind !== "usePower") return "";
   const effect  = p.rollPanel.effect;
@@ -1575,10 +1752,10 @@ function renderPowerPanel(p) {
     </div>
   </div>`;
 }
-
+ 
 function renderActionPanel(p) {
   if (state.phase !== "action" || !state.actionChoice) return "";
-
+ 
   let info = "";
   if (state.actionChoice === "target" && p.finishedTarget && !p.abandonedThisTurn)
     info = `<div class="note" style="margin-top:10px">Tu as abattu ta cible, bien joué. Attends que les autres aient battu leur cible ou abandonnent.</div>`;
@@ -1590,13 +1767,13 @@ function renderActionPanel(p) {
     info = `<div class="note" style="margin-top:10px">Contrat rempli. Une trace de plus dans ton dossier. Vous devez attendre que l'autre joueur termine la sienne ou abandonne.</div>`;
   if (state.actionChoice === "quest" && p.abandonedQuestThisTurn)
     info = `<div class="note" style="margin-top:10px">Vous avez abandonné votre quête. Vous devez attendre que l'autre joueur termine ou abandonne sa quête comme vous.</div>`;
-
+ 
   const targetControls = `
     <button class="btn cyan" data-act="open-action" data-id="${p.id}" data-kind="target" ${(p.finishedTarget || p.abandonedThisTurn) ? "disabled" : ""}>
       ${(p.targetReady && !p.finishedTarget && !p.abandonedThisTurn) ? "Continuer l'attaque" : "Attaquer la cible"}
     </button>
     <button class="btn outline" data-act="abandon-action" data-id="${p.id}" ${(p.finishedTarget || p.abandonedThisTurn) ? "disabled" : ""}>Abandonner</button>`;
-
+ 
   let questControls = "";
   if (!p.finishedQuestsThisTurn && !p.abandonedQuestThisTurn) {
     questControls = p.committedQuestId
@@ -1604,7 +1781,7 @@ function renderActionPanel(p) {
          <button class="btn outline" data-act="abandon-action" data-id="${p.id}">Abandonner</button>`
       : `<button class="btn pink" data-act="open-action" data-id="${p.id}" data-kind="quest">Choisir ma quête du tour</button>`;
   }
-
+ 
   // Duel : gestion séparée
   if (state.actionChoice === "duel") {
     const isLeader = state.players.indexOf(p) === state.leader;
@@ -1627,7 +1804,7 @@ function renderActionPanel(p) {
       ${nextTurnDuel}
     </div>`;
   }
-
+ 
   const allDoneAction = state.players.every(x =>
     state.actionChoice === "target"
       ? (x.finishedTarget || x.abandonedThisTurn)
@@ -1636,7 +1813,7 @@ function renderActionPanel(p) {
   const nextTurnBtn = (allDoneAction && !p.rollPanel)
     ? `<div style="margin-top:14px"><button class="btn green" data-act="next-turn">Passer au tour suivant →</button></div>`
     : "";
-
+ 
   return `<div class="card section-card only-action" style="margin-top:12px">
     <div class="label-top">Phase d'action</div>
     <strong>Action personnelle</strong>
@@ -1649,10 +1826,10 @@ function renderActionPanel(p) {
     ${renderRollPanel(p)}
   </div>`;
 }
-
+ 
 function renderRollPanel(p) {
   if (!p.rollPanel) return "";
-
+ 
   if (p.rollPanel.kind === "chooseQuestList") {
     const openQs = p.chosen.filter(q => (p.questProgress[q.id] || 0) < q.hits && !p.abandonedQuests.includes(q.id));
     return `<div class="note" style="margin-top:12px">
@@ -1675,7 +1852,7 @@ function renderRollPanel(p) {
       </div>
     </div>`;
   }
-
+ 
   if (p.rollPanel.kind === "chooseTargetOptions") {
     return `<div class="note" style="margin-top:12px">
       <div class="label-top">Transmission du Discret</div>
@@ -1695,7 +1872,7 @@ function renderRollPanel(p) {
       </div>
     </div>`;
   }
-
+ 
   if (p.rollPanel.kind === "chooseQuest" || p.rollPanel.kind === "chooseTarget") {
     const isTarget   = p.rollPanel.kind === "chooseTarget";
     const obj        = isTarget ? p.chosenTarget : p.chosen.find(q => q.id === p.rollPanel.questId);
@@ -1720,7 +1897,7 @@ function renderRollPanel(p) {
       </div>` : ""}
     </div>`;
   }
-
+ 
   if (p.rollPanel.kind === "ready") {
     const d = p.rollPanel.data;
     const allDone = state.players.every(x =>
@@ -1774,10 +1951,10 @@ function renderRollPanel(p) {
       ${afterBtns}
     </div>`;
   }
-
+ 
   return "";
 }
-
+ 
 function renderDuel() {
   const d = state.duel;
   if (!d) {
@@ -1791,10 +1968,10 @@ function renderDuel() {
       </div>
     </div>`;
   }
-
+ 
   const attacker = state.players.find(p => p.id === d.attackerId);
   const defender = state.players.find(p => p.id === d.defenderId);
-
+ 
   if (d.phase === "attackerSetup") {
     return renderDuelSetup(attacker, "attacker");
   }
@@ -1829,7 +2006,7 @@ function renderDuel() {
       </div>
     </div>`;
   }
-
+ 
   if (d.phase === "done") {
     const aW = d.attackerWins, dW = d.defenderWins;
     const winner = aW > dW ? attacker : dW > aW ? defender : null;
@@ -1850,7 +2027,7 @@ function renderDuel() {
   }
   return "";
 }
-
+ 
 function renderDuelSetup(p, role) {
   const isAttacker = role === "attacker";
   const d = state.duel;
@@ -1898,17 +2075,17 @@ function renderDuelSetup(p, role) {
     </div>
   </div>`;
 }
-
+ 
 function labelDie(t) {
   return ({ datacoin: "Datacoin", skill: "Compétence", weapon: "Arme", resource: "Ressource", mystery: "Mystère", leader: "Premier joueur" })[t] || t;
 }
-
+ 
 // ── Game logic ────────────────────────────
-
+ 
 function applyNormalDie(p, t, face) {
   const c = CRIMINALS.find(x => x.key === p.criminal);
   if (t === "datacoin") p.datacoins += Number(face.replace("D", ""));
-
+ 
   if (t === "skill") {
     if (face === "A")  p.skills.agilite++;
     if (face === "D")  p.skills.discretion++;
@@ -1918,14 +2095,14 @@ function applyNormalDie(p, t, face) {
     if (face === "C?") p.freeSkill++;
     maybeAwardSkill10Xp(p);
   }
-
+ 
   if (t === "weapon") {
     if (face === "Tir"   && (p.gunLevel   < 3 || (p.gunBuilt3   && p.gunLevel   < 6) || (p.gunBuilt6   && p.gunLevel   < 7))) { p.gunLevel++;   if (c.key === "psychopathe") p.ammo += 2; }
     if (face === "Poing" && (p.meleeLevel < 3 || (p.meleeBuilt3 && p.meleeLevel < 6) || (p.meleeBuilt6 && p.meleeLevel < 7)))   p.meleeLevel++;
     if (face === "2 Munitions") p.ammo += 2;
     if (face === "Warning")     p.warnings++;
   }
-
+ 
   if (t === "resource") {
     if (face === "1 CD")       p.cds++;
     if (face === "1 Bobine")   p.bobines++;
@@ -1934,7 +2111,7 @@ function applyNormalDie(p, t, face) {
     if (face === "2 Bobines")  p.bobines  += 2;
     if (face === "2 Batteries")p.batteries += 2;
   }
-
+ 
   if (t === "mystery") {
     if (face === "Compétence au choix") p.freeSkill++;
     if (face === "Arme au choix")       p.freeWeapon++;
@@ -1944,7 +2121,7 @@ function applyNormalDie(p, t, face) {
     if (face === "Ressource au choix") p.choiceRes++;
   }
 }
-
+ 
 function applyLeader(face, choice) {
   state.players.forEach(p => {
     const c = CRIMINALS.find(x => x.key === p.criminal);
@@ -1965,7 +2142,7 @@ function applyLeader(face, choice) {
   });
   addLog(`Effet du dé premier joueur : ${face}${choice ? ` · ${choice}` : ""}.`);
 }
-
+ 
 // ── Séquence helper ───────────────────────
 // Retourne l'index du joueur suivant en ordre circulaire depuis le leader.
 // filter(p) optionnel : ne retourne que les joueurs qui passent le filtre.
@@ -1978,12 +2155,13 @@ function seqNext(currentIdx, filter) {
   }
   return null;
 }
-
+ 
 // ── Actions ───────────────────────────────
-
+ 
 function pickDieAction(die) {
   if (state.phase !== "draft") return;
   const idx = state.draftOrder[state.draftStep], p = state.players[idx];
+  if (__gameCode && idx !== __myIdx) return; // en ligne : seulement son propre tour
   if (!state.pool.includes(die)) return;
   const max = idx === state.leader ? 3 : 2;
   const playerDice = p.pending.filter(d => d !== "leader");
@@ -2003,10 +2181,11 @@ function pickDieAction(die) {
   checkGameOver();
   render();
 }
-
+ 
 function rollDiceAction(id) {
   const p = state.players.find(x => x.id === id);
   if (!p || !p.pending.length) return;
+  if (__gameCode && state.players[__myIdx]?.id !== id) return; // en ligne : seulement ses propres dés
   p.rolled = [];
   let leaderFaceNeedingChoice = null;
   for (const t of p.pending) {
@@ -2027,7 +2206,7 @@ function rollDiceAction(id) {
   // Le joueur reste sur son écran pour faire ses achats — pas d'avancée ici
   render();
 }
-
+ 
 function resolveLeaderAction(choice) {
   const p = state.players[state.leader];
   if (!p || !p.rollPanel || p.rollPanel.kind !== "leaderChoice") return;
@@ -2036,15 +2215,16 @@ function resolveLeaderAction(choice) {
   // Le leader reste sur son écran pour faire ses achats et choisir l'action
   render();
 }
-
+ 
 function buyAction(id, kind, res) {
   const p = state.players.find(x => x.id === id);
   if (!p) return;
-
+  if (__gameCode && state.players[__myIdx]?.id !== id) return; // en ligne : seulement ses propres achats
+ 
   if (kind === "pv"   && p.datacoins >= 2) { p.datacoins -= 2; p.hp = Math.min(p.maxHp, p.hp + 1); }
   if (kind === "ammo" && p.datacoins >= 1) { p.datacoins -= 1; p.ammo += 1; }
   if (kind === "res"  && p.datacoins >= 3) { p.datacoins -= 3; p[res] += 1; }
-
+ 
   if (kind === "buildM3" && p.meleeLevel >= 3 && !p.meleeBuilt3 && p.batteries >= 1 && p.bobines >= 2 && p.cds >= 1) {
     p.batteries -= 1; p.bobines -= 2; p.cds -= 1; p.meleeBuilt3 = true;
   }
@@ -2057,11 +2237,11 @@ function buyAction(id, kind, res) {
   if (kind === "buildG6" && p.gunLevel >= 6 && p.gunBuilt3 && !p.gunBuilt6 && p.batteries >= 2 && p.bobines >= 3 && p.cds >= 2) {
     p.batteries -= 2; p.bobines -= 3; p.cds -= 2; p.gunBuilt6 = true;
   }
-
+ 
   checkGameOver();
   render();
 }
-
+ 
 function chooseResAction(id, res) {
   const p = state.players.find(x => x.id === id);
   if (!p || p.choiceRes < 1) return;
@@ -2071,9 +2251,9 @@ function chooseResAction(id, res) {
   if (res === "batteries")p.batteries++;
   render();
 }
-
+ 
 // ── Duel actions ──────────────────────────
-
+ 
 function duelPickAction(defenderId) {
   const attacker = state.players[state.leader];
   state.duel = {
@@ -2089,7 +2269,7 @@ function duelPickAction(defenderId) {
   };
   render();
 }
-
+ 
 function duelSkillAction(role, skill) {
   const d = state.duel;
   if (!d) return;
@@ -2097,7 +2277,7 @@ function duelSkillAction(role, skill) {
   else                     d.defenderSkill = skill;
   render();
 }
-
+ 
 function duelWeaponAction(role, weapon) {
   const d = state.duel;
   if (!d) return;
@@ -2118,7 +2298,7 @@ function duelWeaponAction(role, weapon) {
   }
   render();
 }
-
+ 
 function duelAmmoAction(role, n) {
   const d = state.duel;
   if (!d) return;
@@ -2133,7 +2313,7 @@ function duelAmmoAction(role, n) {
   }
   render();
 }
-
+ 
 function duelConfirmAction(role) {
   const d = state.duel;
   if (!d) return;
@@ -2146,14 +2326,14 @@ function duelConfirmAction(role) {
   }
   render();
 }
-
+ 
 function duelRollAction() {
   const d = state.duel;
   if (!d || d.phase !== "rolling") return;
-
+ 
   const attacker = state.players.find(p => p.id === d.attackerId);
   const defender = state.players.find(p => p.id === d.defenderId);
-
+ 
   if (d.attackerTurn) {
     // Attacker rolls
     const skill = attacker.skills[d.attackerSkill] || 0;
@@ -2180,7 +2360,7 @@ function duelRollAction() {
     cur.defenderRoll  = roll;
     cur.defenderTotal = total;
     addLog(`Duel — ${defender.name} lance ${roll} + ${skill} + ${weapon} = ${total}`);
-
+ 
     // Resolve round
     if (cur.attackerTotal > cur.defenderTotal) {
       d.attackerWins++;
@@ -2193,7 +2373,7 @@ function duelRollAction() {
     } else {
       addLog("Égalité — aucune perte.");
     }
-
+ 
     if (d.rounds.length < 4) {
       d.attackerTurn = true; // next round starts with attacker
     } else {
@@ -2215,10 +2395,11 @@ function duelRollAction() {
   }
   render();
 }
-
+ 
 function donePurchaseAction(id) {
   const p = state.players.find(x => x.id === id);
   if (!p || p.done) return;
+  if (__gameCode && state.players[__myIdx]?.id !== id) return; // en ligne : seulement soi-même
   const isLeader = state.players.indexOf(p) === state.leader;
   if (!p.rolled.length) return; // doit avoir lancé ses dés avant
   if (isLeader && !state.actionChoice) return; // le leader doit choisir l'action avant
@@ -2238,9 +2419,10 @@ function donePurchaseAction(id) {
   }
   render();
 }
-
+ 
 function chooseActionAction(kind) {
   if (state.actionChoice) return;
+  if (__gameCode && __myIdx !== state.leader) return; // en ligne : seulement le leader choisit
   state.actionChoice = kind;
   if (kind === "target") {
     state.players.forEach(p => {
@@ -2265,8 +2447,9 @@ function chooseActionAction(kind) {
   addLog(`Choix verrouillé : ${labels[kind] || kind}.`);
   render();
 }
-
+ 
 function openActionAction(id, kind) {
+  if (__gameCode && state.players[__myIdx]?.id !== id) return; // en ligne : seulement ses propres actions
   if (kind === "target") startMusic("attack");
   const p = state.players.find(x => x.id === id);
   if (kind === "target") {
@@ -2285,7 +2468,7 @@ function openActionAction(id, kind) {
   }
   render();
 }
-
+ 
 function pickQuestAction(id, qid) {
   const p = state.players.find(x => x.id === id);
   p.committedQuestId = qid;
@@ -2293,7 +2476,7 @@ function pickQuestAction(id, qid) {
   addLog(`${p.name} choisit sa quête pour ce tour.`);
   render();
 }
-
+ 
 function abandonQuestAction(id, qid) {
   const p = state.players.find(x => x.id === id);
   if (!p || p.abandonedQuestThisTurn || p.finishedQuestsThisTurn) return;
@@ -2305,17 +2488,17 @@ function abandonQuestAction(id, qid) {
   addLog(`${p.name} : Vous avez abandonné votre quête. Vous devez attendre que l'autre joueur termine ou abandonne sa quête comme vous.`);
   render();
 }
-
+ 
 function submitActionAction(id, kind, weapon, ammo) {
   const p   = state.players.find(x => x.id === id);
   const obj = kind === "chooseTarget" ? p.chosenTarget : p.chosen.find(q => q.id === p.rollPanel.questId);
   if (!obj) return;
-
+ 
   const natural    = 1 + Math.floor(Math.random() * 20);
   const skillKeys  = kind === "chooseTarget" ? obj.skill : [obj.skill];
   let totalSkill   = skillKeys.reduce((s, k) => s + (p.skills[k] || 0), 0);
   let weaponBonus  = 0;
-
+ 
   if (weapon === "melee") weaponBonus = p.meleeLevel;
   if (weapon === "gun")   {
     if (p.gunLevel < 3) return;
@@ -2323,28 +2506,28 @@ function submitActionAction(id, kind, weapon, ammo) {
     p.ammo -= spend;
     weaponBonus = p.gunLevel + spend;
   }
-
+ 
   const modPlus3       = p.plus3        ? 3 : 0;
   const modMinus3      = p.powerMinus3  ? 3 : 0;
   const modSystemPlus2 = p.systemPlus2  ? 2 : 0;
   const modSystemMinus2= p.systemMinus2 ? 2 : 0;
-
+ 
   let naturalRolled = natural;
   if (p.forceReroll) { naturalRolled = 1 + Math.floor(Math.random() * 20); p.forceReroll = false; }
-
+ 
   const total   = naturalRolled + modPlus3 - modMinus3 + modSystemPlus2 - modSystemMinus2 + totalSkill + weaponBonus;
   p.plus3       = false;
   if (p.powerMinus3)  p.powerMinus3  = 0;
   if (p.systemPlus2)  p.systemPlus2  = 0;
   if (p.systemMinus2) p.systemMinus2 = 0;
-
+ 
   const success = total >= obj.threshold;
   let extra = "";
   if (modPlus3)        extra += "+3 appliqué. ";
   if (modMinus3)       extra += "-3 appliqué. ";
   if (modSystemPlus2)  extra += "+2 système appliqué. ";
   if (modSystemMinus2) extra += "-2 système appliqué. ";
-
+ 
   if (kind === "chooseTarget") {
     if (success) {
       let dmg = p.doubleHit ? 2 : 1;
@@ -2398,7 +2581,7 @@ function submitActionAction(id, kind, weapon, ammo) {
       addLog(`${p.name} rate ${obj.name}.`);
     }
   }
-
+ 
   p.doubleNat20 = false;
   p.rollPanel   = { kind: "ready", data: { label: obj.name, natural: naturalRolled, total, success, threshold: obj.threshold, extra } };
   if (kind === "chooseTarget" && !p.finishedTarget && !p.abandonedThisTurn) p.targetReady = true;
@@ -2409,7 +2592,7 @@ function submitActionAction(id, kind, weapon, ammo) {
   if (!success) triggerBloodEffect();
   render();
 }
-
+ 
 function pickTargetAction(id, idx) {
   const p = state.players.find(x => x.id === id);
   if (!p || p.chosenTarget || !p.targetOptions[idx]) return;
@@ -2419,14 +2602,14 @@ function pickTargetAction(id, idx) {
   addLog(`${p.name} choisit sa cible : ${p.chosenTarget.name}.`);
   render();
 }
-
+ 
 function closePanelAction(id) {
   const p = state.players.find(x => x.id === id);
   if (!p) return;
   p.rollPanel = null;
   render();
 }
-
+ 
 function abandonAction(id) {
   const p = state.players.find(x => x.id === id);
   if (!p) return;
@@ -2444,59 +2627,118 @@ function abandonAction(id) {
     : `${p.name} : Vous avez abandonné votre quête. Vous devez attendre que l'autre joueur termine ou abandonne sa quête comme vous.`);
   render();
 }
-
+ 
 function startSetupAction() { state.mode = "multi"; state.playerCount = Math.max(2, state.playerCount); state.screen = "setup"; state.setupStep = 0; state.setupLock = false; initSetup(); render(); }
 function startSoloAction()  { state.mode = "solo";  state.playerCount = 1; state.screen = "setup"; state.setupStep = 0; state.setupLock = false; initSetup(); render(); }
 function setPlayerCountAction(v) { state.playerCount = Number(v); }
-
-// Valider sa fiche en mode en ligne (non-hôte)
-function onlineSetupReadyAction() {
-  const p = state.setup[__myIdx];
+ 
+// Joueur valide sa fiche → écrit dans joined sous forme {idx, sheet}
+async function onlineSetupReadyAction() {
+  const p = __localForm; // toujours depuis la source de vérité locale
   if (!p) return;
   if (!p.name.trim()) { alert("Entre un surnom avant de continuer."); return; }
   if (p.chosen.length !== 3) { alert("Choisis exactement 3 quêtes avant de continuer."); return; }
-  // Envoyer la fiche à l'hôte via la colonne submissions
-  (async () => {
-    try {
-      const { data } = await supa.from("games").select("submissions").eq("code", __gameCode).single();
-      const submissions = (data && data.submissions) || {};
-      submissions[String(__myIdx)] = JSON.parse(JSON.stringify(p));
-      await supa.from("games").update({ submissions }).eq("code", __gameCode);
-    } catch(e) {}
-  })();
+ 
+  const sheet = JSON.parse(JSON.stringify(p));
+ 
+  // Lire joined actuel
+  const { data, error } = await supa.from("games").select("joined").eq("code", __gameCode).single();
+  if (error || !data) { alert("Erreur connexion."); return; }
+ 
+  // Remplacer mon entrée dans joined par {idx, sheet}
+  const joined = Array.isArray(data.joined) ? data.joined : [];
+  const newJoined = joined.map(e => {
+    const eIdx = typeof e === "object" ? e.idx : e;
+    return eIdx === __myIdx ? { idx: __myIdx, sheet } : e;
+  });
+  // Si mon idx n'était pas encore dans joined (cas hôte), l'ajouter
+  if (!newJoined.some(e => (typeof e === "object" ? e.idx : e) === __myIdx)) {
+    newJoined.push({ idx: __myIdx, sheet });
+  }
+ 
+  const { error: e2 } = await supa.from("games").update({ joined: newJoined }).eq("code", __gameCode);
+  if (e2) { alert("Erreur enregistrement : " + e2.message); return; }
+ 
+  __localForm      = sheet;
+  __localSubmitted = true;
+  state.setup[__myIdx] = sheet;
+
+  if (__isHost) {
+    // Mettre à jour __allReady immédiatement pour l'hôte
+    state.__allReady = allSheetsReady(newJoined);
+    await syncToCloud();
+  }
+
   render();
 }
-
+ 
 async function startOnlineAction() {
   state.mode = "multi";
   state.playerCount = Math.max(2, state.playerCount);
   state.screen = "lobby";
-  render(); // afficher le lobby tout de suite
+  render();
   const code = await createOnlineGame();
   if (code) render();
 }
-
+ 
 async function joinOnlineAction() {
   const input = document.getElementById("join-code");
   const code  = (input ? input.value.trim().toUpperCase() : "");
   if (code.length !== 4) { alert("Entre un code à 4 lettres."); return; }
   state.screen = "lobby";
-  render(); // afficher "connexion…"
+  render();
   const ok = await joinOnlineGame(code);
   if (!ok) { state.screen = "home"; render(); }
   else render();
 }
-
-function onlineLaunchAction() {
+ 
+// Hôte lance le setup (transition lobby → setup)
+async function onlineLaunchAction() {
   if (!__isHost) return;
   state.mode = "multi";
   state.screen = "setup";
   state.setupStep = 0;
   state.setupLock = false;
   initSetup();
-  render(); // broadcast automatique via render()
+  __localSubmitted = false;
+  __localForm = JSON.parse(JSON.stringify(makePlayer(0))); // deep clone indépendant
+  // Sync AVANT render pour que Supabase soit à jour quand les non-hôtes pollent
+  await syncToCloud();
+  render();
 }
+ 
+// Hôte clique "Rejoindre la matrice" → lance la partie pour tout le monde
+async function onlineLaunchMatrixAction() {
+  if (!__isHost) return;
 
+  const { data, error } = await supa.from("games").select("joined").eq("code", __gameCode).single();
+  if (error || !data) { alert("Erreur connexion."); return; }
+
+  const sheets = sheetsFromJoined(data.joined);
+
+  // Vérification finale
+  for (let i = 1; i < state.playerCount; i++) {
+    if (!sheets[String(i)]) {
+      alert(`Le joueur ${i + 1} n'a pas encore validé son profil.`);
+      return;
+    }
+  }
+  if (!__localSubmitted || !__localForm) {
+    alert("Valide d'abord ton propre profil.");
+    return;
+  }
+
+  // Charger toutes les fiches dans state.setup
+  state.setup[0] = JSON.parse(JSON.stringify(__localForm));
+  for (let i = 1; i < state.playerCount; i++) {
+    state.setup[i] = JSON.parse(JSON.stringify(sheets[String(i)]));
+  }
+
+  initGame();
+  await syncToCloud();
+  render();
+}
+ 
 function setupNextAction() {
   const p = state.setup[state.setupStep];
   if (!p.name.trim()) { alert("Entre un surnom avant de continuer."); return; }
@@ -2505,50 +2747,77 @@ function setupNextAction() {
   state.setupLock = true;
   render();
 }
-
+ 
 function setupFieldAction(i, k, v) {
-  const p = state.setup[i];
-  p[k] = v;
-  if (k === "criminal") {
-    const c = CRIMINALS.find(x => x.key === v);
-    p.skills = { agilite: 0, ruse: 0, violence: 0, folie: 0, discretion: 0 };
-    p.skills[c.skill] = 2;
+  if (__gameCode && i === __myIdx) {
+    // Mode en ligne : modifier __localForm (deep clone indépendant de state)
+    if (!__localForm) return;
+    __localForm[k] = v;
+    if (k === "criminal") {
+      const c = CRIMINALS.find(x => x.key === v);
+      __localForm.skills = { agilite: 0, ruse: 0, violence: 0, folie: 0, discretion: 0 };
+      __localForm.skills[c.skill] = 2;
+    }
+  } else {
+    const p = state.setup[i];
+    if (!p) return;
+    p[k] = v;
+    if (k === "criminal") {
+      const c = CRIMINALS.find(x => x.key === v);
+      p.skills = { agilite: 0, ruse: 0, violence: 0, folie: 0, discretion: 0 };
+      p.skills[c.skill] = 2;
+    }
   }
   render();
 }
-
+ 
 function toggleQuestAction(i, qid) {
-  const p = state.setup[i], q = p.quests.find(x => x.id === qid);
-  if (p.chosen.some(x => x.id === qid)) p.chosen = p.chosen.filter(x => x.id !== qid);
-  else if (p.chosen.length < 3) p.chosen.push(q);
+  if (__gameCode && i === __myIdx) {
+    // Mode en ligne : modifier __localForm
+    if (!__localForm) return;
+    const q = __localForm.quests.find(x => x.id === qid);
+    if (__localForm.chosen.some(x => x.id === qid)) {
+      __localForm.chosen = __localForm.chosen.filter(x => x.id !== qid);
+    } else if (__localForm.chosen.length < 3) {
+      __localForm.chosen.push(q);
+    }
+  } else {
+    const p = state.setup[i];
+    if (!p) return;
+    const q = p.quests.find(x => x.id === qid);
+    if (p.chosen.some(x => x.id === qid)) p.chosen = p.chosen.filter(x => x.id !== qid);
+    else if (p.chosen.length < 3) p.chosen.push(q);
+  }
   render();
 }
-
+ 
 function launchAction() {
   const last = state.setup[state.setupStep];
   if (!last.name.trim()) { alert("Entre un surnom avant de lancer la partie."); return; }
   if (last.chosen.length !== 3) { alert("Choisis exactement 3 quêtes avant de lancer la partie."); return; }
   initGame(); render();
 }
-
+ 
 function boostSkillAction(id, skill) {
   const p = state.players.find(x => x.id === id);
   if (!p || p.freeSkill < 1) return;
+  if (__gameCode && state.players[__myIdx]?.id !== id) return;
   p.freeSkill--;
   p.skills[skill]++;
   maybeAwardSkill10Xp(p);
   render();
 }
-
+ 
 function boostWeaponAction(id, weapon) {
   const p = state.players.find(x => x.id === id);
   if (!p || p.freeWeapon < 1) return;
+  if (__gameCode && state.players[__myIdx]?.id !== id) return;
   p.freeWeapon--;
   if (weapon === "melee" && (p.meleeLevel < 3 || (p.meleeBuilt3 && p.meleeLevel < 6) || (p.meleeBuilt6 && p.meleeLevel < 7))) p.meleeLevel++;
   if (weapon === "gun"   && (p.gunLevel   < 3 || (p.gunBuilt3   && p.gunLevel   < 6) || (p.gunBuilt6   && p.gunLevel   < 7))) p.gunLevel++;
   render();
 }
-
+ 
 function openPowerAction(id, effect) {
   const p = state.players.find(x => x.id === id);
   if (!p || state.phase !== "action") return;
@@ -2556,21 +2825,21 @@ function openPowerAction(id, effect) {
   p.rollPanel = { kind: "usePower", effect };
   render();
 }
-
+ 
 function closePowerAction(id) {
   const p = state.players.find(x => x.id === id);
   if (!p) return;
   if (p.rollPanel && p.rollPanel.kind === "usePower") p.rollPanel = null;
   render();
 }
-
+ 
 function applyPowerAction(id, targetId, effect) {
   const p = state.players.find(x => x.id === id);
   const t = state.players.find(x => x.id === targetId);
   if (!p || !t || state.phase !== "action") return;
   const used = p.questPowerUses[effect] || 0;
   if (used >= 3) return;
-
+ 
   if (effect === "+3 / -3") {
     if (targetId === id) { t.plus3 = true; addLog(`${p.name} utilise sa capacité sur ${t.name} : +3 à son prochain d20.`); }
     else                 { t.powerMinus3 = (t.powerMinus3 || 0) + 1; addLog(`${p.name} utilise sa capacité sur ${t.name} : -3 à son prochain d20.`); }
@@ -2581,31 +2850,32 @@ function applyPowerAction(id, targetId, effect) {
     t.doubleNat20 = true;
     addLog(`${p.name} active l'effet "20 naturel = 2 dégâts" sur ${t.name}.`);
   }
-
+ 
   p.questPowerUses[effect] = used + 1;
   addLog(`${p.name} a maintenant ${Math.max(0, 3 - p.questPowerUses[effect])}/3 utilisation(s) restante(s) pour cette capacité.`);
   p.rollPanel = null;
   render();
 }
-
+ 
 // ── Event delegation ──────────────────────
-
+ 
 document.addEventListener("input", e => {
   const t = e.target;
   if (t.dataset.field && t.dataset.idx !== undefined && t.tagName === "INPUT") {
     setupFieldAction(Number(t.dataset.idx), t.dataset.field, t.value);
   }
 });
-
+ 
 document.addEventListener("change", e => {
   const t = e.target;
-  if (t.id === "player-count-home") setPlayerCountAction(t.value);
+  if (t.id === "player-count-local") setPlayerCountAction(t.value);
+  if (t.id === "player-count-online") setPlayerCountAction(t.value);
   if (t.id === "player-count") setPlayerCountAction(t.value);
   if (t.dataset.field && t.dataset.idx !== undefined && t.tagName === "SELECT") {
     setupFieldAction(Number(t.dataset.idx), t.dataset.field, t.value);
   }
 });
-
+ 
 document.addEventListener("click", e => {
   if (e.target.id === "btn-mute") { toggleMute(); return; }
   unlockAudio();
@@ -2617,6 +2887,7 @@ document.addEventListener("click", e => {
   if (a === "start-online")  startOnlineAction();
   if (a === "join-online")   joinOnlineAction();
   if (a === "online-launch") onlineLaunchAction();
+  if (a === "online-launch-matrix") onlineLaunchMatrixAction();
   if (a === "launch")        launchAction();
   if (a === "toggle-quest")  toggleQuestAction(Number(t.dataset.idx), t.dataset.qid);
   if (a === "pick-die")      pickDieAction(t.dataset.die);
@@ -2643,22 +2914,24 @@ document.addEventListener("click", e => {
   if (a === "duel-ammo")     duelAmmoAction(t.dataset.role, Number(t.dataset.n));
   if (a === "duel-confirm")  duelConfirmAction(t.dataset.role);
   if (a === "duel-roll")     duelRollAction();
-  if (a === "end-turn")      nextTurn();
+  if (a === "end-turn")      { if (!__gameCode || __myIdx === state.leader) nextTurn(); }
   if (a === "next-turn")     nextTurn();
   if (a === "pick-target")   pickTargetAction(t.dataset.id, Number(t.dataset.idx));
   if (a === "show-private")  { state.lockScreen = t.dataset.id; state.privateView = null; render(); }
   if (a === "unlock-private"){ state.privateView = t.dataset.id; state.lockScreen = null; render(); }
   if (a === "close-private") { state.privateView = null; render(); }
   if (a === "cancel-lock")   { state.lockScreen = null; render(); }
-  if (a === "pick-gender")   { state.setup[Number(t.dataset.idx)].gender = t.dataset.gender; render(); }
+  if (a === "pick-gender")   { const gi = Number(t.dataset.idx); if (__gameCode && gi === __myIdx) { if (__localForm) { __localForm.gender = t.dataset.gender; } } else { if (state.setup[gi]) state.setup[gi].gender = t.dataset.gender; } render(); }
   if (a === "online-setup-ready") onlineSetupReadyAction();
   if (a === "setup-next")    setupNextAction();
   if (a === "setup-unlock")  { state.setupLock = false; render(); }
   if (a === "draft-unlock")  { state.draftLocked = false; render(); }
   if (a === "seq-unlock")    { state.seqLocked = false; render(); }
+  if (a === "resume-session") { const s = getSavedSession(); if (s) restoreSession(s); }
+  if (a === "abandon-session") abandonSession();
+  if (a === "go-to-setup") { state.screen = "setup"; if (!state.setup[__myIdx]) state.setup[__myIdx] = makePlayer(__myIdx); render(); }
 });
-
+ 
 // ── Boot ──────────────────────────────────
 initSetup();
 render();
-
