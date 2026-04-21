@@ -213,6 +213,20 @@ async function syncToCloud() {
     __isSyncing = false;
   }
 }
+
+async function syncSharedState() {
+  if (!__gameCode || __isSyncing) return;
+  __isSyncing = true;
+  try {
+    state.__stateVersion = (state.__stateVersion || 0) + 1;
+    const { error } = await supa.from("games")
+      .update({ host_state: JSON.parse(JSON.stringify(state)) })
+      .eq("code", __gameCode);
+    if (error) console.error("[shared-sync]", error.message);
+  } finally {
+    __isSyncing = false;
+  }
+}
 function broadcastState() { return syncToCloud(); }
  
 function getOnlineSheetsStatus(joined, expectedCount = state.playerCount) {
@@ -369,6 +383,12 @@ function startPolling(code) {
       }
  
       if (__isHost) {
+        if (data.host_state && (data.host_state.__stateVersion || 0) > (state.__stateVersion || 0)) {
+          Object.keys(data.host_state).forEach(k => { state[k] = data.host_state[k]; });
+          render();
+          return;
+        }
+
         if (state.screen === "game" && state.phase === "draft" && autoAdvanceDraftIfBlocked(state)) {
           await supa.from("games").update({ host_state: JSON.parse(JSON.stringify(state)) }).eq("code", code);
           render();
@@ -624,6 +644,7 @@ function stage(p) {
  
 function buildOrder() {
   const n = state.players.length, f = state.leader, fw = [], bw = [], o = [];
+  if (state.mode === "multi" && n === 2) return [0, 1, 0, 1];
   for (let i = 0; i < n; i++) fw.push((f + i) % n);
   for (let i = 0; i < n; i++) bw.push((f - i + n) % n);
   fw.forEach(i => o.push(i));
@@ -659,7 +680,9 @@ function initGame() {
     x.chosen.forEach(q => { x.questProgress[q.id] = 0; x.questPowerUses[q.effect] = 0; });
     return x;
   });
-  state.leader   = (state.mode === "solo" || __gameCode) ? 0 : Math.floor(Math.random() * state.players.length);
+  state.leader   = (state.mode === "solo" || __gameCode || (state.mode === "multi" && state.players.length === 2))
+    ? 0
+    : Math.floor(Math.random() * state.players.length);
   state.rankLvl2 = [];
   state.__draftProcessed = {};
   startTurn(true);
@@ -1088,7 +1111,6 @@ function triggerBloodEffect(intense = false) {
 function renderLobby() {
   const code = __gameCode || "----";
   if (__isHost) {
-  {
     const total = __connectedPlayers + 1; // hôte + joueurs connectés
     const allConnected = total >= state.playerCount;
     return `<div class="wrap" style="max-width:480px;margin:0 auto;padding-top:60px">
@@ -1109,7 +1131,6 @@ function renderLobby() {
         </div>
       </div>
     </div>`;
-  }
   } else {
     return `<div class="wrap" style="max-width:480px;margin:0 auto;padding-top:60px">
       <div class="card">
@@ -2596,6 +2617,7 @@ function rollDiceAction(id) {
   }
   // Le joueur reste sur son écran pour faire ses achats — pas d'avancée ici
   render();
+  if (__gameCode) syncSharedState();
 }
  
 function resolveLeaderAction(choice) {
@@ -2605,6 +2627,7 @@ function resolveLeaderAction(choice) {
   p.rollPanel = null;
   // Le leader reste sur son écran pour faire ses achats et choisir l'action
   render();
+  if (__gameCode) syncSharedState();
 }
  
 function buyAction(id, kind, res) {
@@ -2631,6 +2654,7 @@ function buyAction(id, kind, res) {
  
   checkGameOver();
   render();
+  if (__gameCode) syncSharedState();
 }
  
 function chooseResAction(id, res) {
@@ -2641,6 +2665,7 @@ function chooseResAction(id, res) {
   if (res === "bobines")  p.bobines++;
   if (res === "batteries")p.batteries++;
   render();
+  if (__gameCode) syncSharedState();
 }
  
 // ── Duel actions ──────────────────────────
@@ -2809,6 +2834,7 @@ function donePurchaseAction(id) {
     }
   }
   render();
+  if (__gameCode) syncSharedState();
 }
  
 function chooseActionAction(kind) {
@@ -2837,6 +2863,7 @@ function chooseActionAction(kind) {
   const labels = { target: "attaquer la cible", quest: "faire les quêtes", duel: "affaiblir un joueur" };
   addLog(`Choix verrouillé : ${labels[kind] || kind}.`);
   render();
+  if (__gameCode) syncSharedState();
 }
  
 function openActionAction(id, kind) {
@@ -2858,6 +2885,7 @@ function openActionAction(id, kind) {
       : { kind: "chooseQuestList" };
   }
   render();
+  if (__gameCode) syncSharedState();
 }
  
 function pickQuestAction(id, qid) {
@@ -2866,6 +2894,7 @@ function pickQuestAction(id, qid) {
   p.rollPanel = { kind: "chooseQuest", questId: qid };
   addLog(`${p.name} choisit sa quête pour ce tour.`);
   render();
+  if (__gameCode) syncSharedState();
 }
  
 function abandonQuestAction(id, qid) {
@@ -2878,6 +2907,7 @@ function abandonQuestAction(id, qid) {
   p.finishedQuestsThisTurn  = true;
   addLog(`${p.name} : Vous avez abandonné votre quête. Vous devez attendre que l'autre joueur termine ou abandonne sa quête comme vous.`);
   render();
+  if (__gameCode) syncSharedState();
 }
  
 function submitActionAction(id, kind, weapon, ammo) {
@@ -2982,6 +3012,7 @@ function submitActionAction(id, kind, weapon, ammo) {
   playRollSound(success);
   if (!success) triggerBloodEffect();
   render();
+  if (__gameCode) syncSharedState();
 }
  
 function pickTargetAction(id, idx) {
@@ -2992,6 +3023,7 @@ function pickTargetAction(id, idx) {
   p.rollPanel    = { kind: "chooseTarget" };
   addLog(`${p.name} choisit sa cible : ${p.chosenTarget.name}.`);
   render();
+  if (__gameCode) syncSharedState();
 }
  
 function closePanelAction(id) {
@@ -2999,6 +3031,7 @@ function closePanelAction(id) {
   if (!p) return;
   p.rollPanel = null;
   render();
+  if (__gameCode) syncSharedState();
 }
  
 function abandonAction(id) {
@@ -3017,6 +3050,7 @@ function abandonAction(id) {
     ? `${p.name} : Tu as abandonné le combat, attends que les autres aient battu leur cible ou abandonné comme toi.`
     : `${p.name} : Vous avez abandonné votre quête. Vous devez attendre que l'autre joueur termine ou abandonne sa quête comme vous.`);
   render();
+  if (__gameCode) syncSharedState();
 }
  
 function startSetupAction() { state.mode = "multi"; state.playerCount = Math.max(2, state.playerCount); state.screen = "setup"; state.setupStep = 0; state.setupLock = false; initSetup(); render(); }
