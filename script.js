@@ -2,7 +2,8 @@
    Murder Inside – script.js
    ══════════════════════════════════════════ */
 
-const CODE_VERSION = "20260408";
+const CODE_VERSION = "20260421";
+const BUILD_TAG = "draft-fix-a1";
  
 // ── Data ──────────────────────────────────
  
@@ -132,7 +133,8 @@ const state = {
   setupStep: 0, setupLock: false,
   draftLocked: false,
   seqPlayerIdx: 0, seqLocked: false,
-  duel: null
+  duel: null,
+  __stateVersion: 0
 };
  
 // ── Supabase Multijoueur ──────────────────────────────
@@ -140,6 +142,25 @@ const state = {
 const SUPA_URL = "https://lpnclqfcshuhppbrhaiw.supabase.co";
 const SUPA_KEY = "sb_publishable_7kMPJ5D_MfqY9piihSxVSg_jWjRQv1U";
 const supa = supabase.createClient(SUPA_URL, SUPA_KEY);
+
+function buildSupaNetworkHelp(error) {
+  const msg = String(error && (error.message || error) || "Erreur inconnue");
+  const lines = [
+    "Impossible de contacter Supabase.",
+    `Détail: ${msg}`,
+    "",
+    `SUPA_URL actuel: ${SUPA_URL}`,
+    "Vérifie que l'URL est correcte et que le projet Supabase existe toujours.",
+    ""
+  ];
+
+  if (location.protocol === "file:") {
+    lines.push("Tu es probablement en file://. Lance un serveur local (ex: python3 -m http.server) puis ouvre http://localhost:8000.");
+  } else {
+    lines.push("Vérifie aussi ta connexion Internet/DNS, VPN, pare-feu ou bloqueur réseau.");
+  }
+  return lines.join("\n");
+}
  
 let __gameCode         = null;
 let __isHost           = false;
@@ -150,6 +171,9 @@ let __connectedPlayers = 0;
 let __localForm        = null;
 let __localSubmitted   = false;
 let __isSyncing        = false;
+let __validationNonce  = 0;
+let __draftRequestNonce = 0;
+let __draftPending     = null;
  
 // ── localStorage ─────────────────────────────────────
  
@@ -216,6 +240,39 @@ function allSheetsReady(joined) {
   }
   return true;
 }
+
+async function invalidateOnlineProfileValidation() {
+  if (!__gameCode || !__localSubmitted) return;
+
+  const nonce = ++__validationNonce;
+  __localSubmitted = false;
+
+  try {
+    const { data, error } = await supa.from("games").select("joined").eq("code", __gameCode).single();
+    if (error || !data) return;
+    if (nonce !== __validationNonce || __localSubmitted) return;
+
+    const joined = Array.isArray(data.joined) ? data.joined : [];
+    const newJoined = joined.map(e => {
+      const eIdx = typeof e === "object" ? e.idx : e;
+      return eIdx === __myIdx ? __myIdx : e;
+    });
+
+    if (!newJoined.some(e => (typeof e === "object" ? e.idx : e) === __myIdx)) {
+      newJoined.push(__myIdx);
+    }
+
+    const { error: updateError } = await supa.from("games").update({ joined: newJoined }).eq("code", __gameCode);
+    if (updateError) return;
+
+    if (__isHost) {
+      state.__allReady = allSheetsReady(newJoined);
+      await syncToCloud();
+    }
+  } catch (e) {
+    console.error("[invalidateOnlineProfileValidation]", e);
+  }
+}
  
 // ── Polling ───────────────────────────────────────────
  
@@ -231,6 +288,67 @@ function sheetsFromJoined(joined) {
 function idxFromJoined(joined) {
   return (Array.isArray(joined) ? joined : []).map(e => typeof e === "object" ? e.idx : e).filter(e => typeof e === "number");
 }
+
+function upsertJoinedEntry(joined, idx, patch) {
+  let found = false;
+  const next = (Array.isArray(joined) ? joined : []).map(e => {
+    const eIdx = typeof e === "object" ? e.idx : e;
+    if (eIdx !== idx) return e;
+    found = true;
+    const base = (e && typeof e === "object") ? e : { idx };
+    return { ...base, ...patch, idx };
+  });
+  if (!found) next.push({ idx, ...patch });
+  return next;
+}
+
+function clearDraftRequestFromJoined(joined, idx) {
+  return (Array.isArray(joined) ? joined : []).map(e => {
+    const eIdx = typeof e === "object" ? e.idx : e;
+    if (eIdx !== idx || !e || typeof e !== "object") return e;
+    const copy = { ...e };
+    delete copy.draftRequest;
+    return copy;
+  });
+}
+
+function clearAllDraftRequestsFromJoined(joined) {
+  return (Array.isArray(joined) ? joined : []).map(e => {
+    if (!e || typeof e !== "object") return e;
+    const copy = { ...e };
+    delete copy.draftRequest;
+    return copy;
+  });
+}
+
+function autoAdvanceDraftIfBlocked(targetState) {
+  if (!targetState || targetState.phase !== "draft") return false;
+  let changed = false;
+  const max = 2;
+
+  while (targetState.phase === "draft") {
+    const idx = targetState.draftOrder[targetState.draftStep];
+    const p = targetState.players[idx];
+    const picked = p ? p.pending.filter(d => d !== "leader").length : max;
+    if (picked < max) break;
+
+    if (targetState.draftStep >= targetState.draftOrder.length - 1) {
+      targetState.phase = "roll";
+      targetState.draftLocked = false;
+      targetState.seqPlayerIdx = targetState.leader;
+      targetState.seqLocked = true;
+      changed = true;
+      break;
+    }
+
+    targetState.draftStep++;
+    targetState.draftLocked = true;
+    changed = true;
+  }
+
+  if (changed) targetState.__stateVersion = (targetState.__stateVersion || 0) + 1;
+  return changed;
+}
  
 function startPolling(code) {
   stopPolling();
@@ -238,13 +356,71 @@ function startPolling(code) {
     try {
       const { data, error } = await supa.from("games").select("host_state, joined").eq("code", code).single();
       if (error || !data) return;
+
+      if (!__isHost && data.host_state
+        && data.host_state.screen === "game"
+        && data.host_state.phase === "draft"
+        && (data.host_state.__stateVersion || 0) > (state.__stateVersion || 0)) {
+        const localForm = __localForm;
+        Object.keys(data.host_state).forEach(k => { state[k] = data.host_state[k]; });
+        __localForm = localForm;
+        render();
+        return;
+      }
  
       if (__isHost) {
+        if (state.screen === "game" && state.phase === "draft" && autoAdvanceDraftIfBlocked(state)) {
+          await supa.from("games").update({ host_state: JSON.parse(JSON.stringify(state)) }).eq("code", code);
+          render();
+          return;
+        }
+
+        if (state.screen === "game" && state.phase === "draft") {
+          const activeIdx = state.draftOrder[state.draftStep];
+          const activeEntry = (Array.isArray(data.joined) ? data.joined : []).find(e => (typeof e === "object" ? e.idx : e) === activeIdx);
+          const draftRequest = activeEntry && typeof activeEntry === "object" ? activeEntry.draftRequest : null;
+          const processedNonce = (state.__draftProcessed && state.__draftProcessed[String(activeIdx)]) || 0;
+
+          if (draftRequest && draftRequest.type === "pick-die" && draftRequest.nonce && draftRequest.nonce !== processedNonce) {
+            const expectedStep = Number(draftRequest.step);
+            const expectedVersion = Number(draftRequest.stateVersion);
+            const hasStrictGuards = Number.isFinite(expectedStep) && Number.isFinite(expectedVersion);
+            const stepMatches = hasStrictGuards && expectedStep === state.draftStep;
+            const versionMatches = hasStrictGuards && expectedVersion === (state.__stateVersion || 0);
+            if (!stepMatches || !versionMatches) {
+              const cleanedJoined = clearDraftRequestFromJoined(data.joined, activeIdx);
+              state.__joinedSnapshot = cleanedJoined;
+              await supa.from("games").update({ joined: cleanedJoined }).eq("code", code);
+              return;
+            }
+
+            const nextState = JSON.parse(JSON.stringify(state));
+            const applied = applyDraftPickToState(nextState, draftRequest.die);
+            nextState.__draftProcessed = nextState.__draftProcessed || {};
+            nextState.__draftProcessed[String(activeIdx)] = draftRequest.nonce;
+
+            const cleanedJoined = clearDraftRequestFromJoined(data.joined, activeIdx);
+            if (applied) Object.keys(nextState).forEach(k => { state[k] = nextState[k]; });
+            state.__joinedSnapshot = cleanedJoined;
+
+            await supa.from("games").update({
+              host_state: JSON.parse(JSON.stringify(state)),
+              joined: cleanedJoined
+            }).eq("code", code);
+            render();
+            return;
+          }
+        }
+
         // Hôte : compter les connectés + lire les fiches soumises
         const connectedIdxs = idxFromJoined(data.joined);
         const newCount = connectedIdxs.filter(i => i !== 0).length;
         let changed = newCount !== __connectedPlayers;
         __connectedPlayers = newCount;
+        if (JSON.stringify(state.__joinedSnapshot || []) !== JSON.stringify(data.joined || [])) {
+          state.__joinedSnapshot = data.joined || [];
+          changed = true;
+        }
  
         const sheets = sheetsFromJoined(data.joined);
         Object.keys(sheets).forEach(idxStr => {
@@ -268,6 +444,13 @@ function startPolling(code) {
         // Non-hôte : appliquer host_state sauf mon slot setup
         if (!data.host_state) return;
         const hs = data.host_state;
+        if (__draftPending) {
+          const stillPending = hs.phase === "draft"
+            && hs.draftStep === __draftPending.step
+            && (hs.__stateVersion || 0) === __draftPending.stateVersion;
+          if (!stillPending) __draftPending = null;
+        }
+        if ((hs.__stateVersion || 0) < (state.__stateVersion || 0)) return;
         const myIdx = __myIdx;
  
         // Appliquer tout le host_state — __localForm est complètement séparé de state
@@ -285,21 +468,32 @@ function startPolling(code) {
 // ── Créer / Rejoindre ─────────────────────────────────
  
 async function createOnlineGame() {
-  const code = genCode();
-  __gameCode = code;
-  __isHost   = true;
-  __myIdx    = 0;
-  const stateSnap = JSON.parse(JSON.stringify(state));
-  stateSnap.__codeVersion = CODE_VERSION;
-  const { error } = await supa.from("games").insert({
-    code,
-    host_state: stateSnap,
-    joined: [0]
-  });
-  if (error) { alert("Erreur création partie : " + error.message); return null; }
-  saveSession();
-  startPolling(code);
-  return code;
+  try {
+    const code = genCode();
+    __gameCode = code;
+    __isHost   = true;
+    __myIdx    = 0;
+    __draftPending = null;
+    const stateSnap = JSON.parse(JSON.stringify(state));
+    stateSnap.__codeVersion = CODE_VERSION;
+    const { error } = await supa.from("games").insert({
+      code,
+      host_state: stateSnap,
+      joined: [0]
+    });
+    if (error) {
+      const raw = String(error.message || error);
+      const networkLike = /failed to fetch|networkerror|network request failed|fetch/i.test(raw);
+      alert(networkLike ? buildSupaNetworkHelp(error) : "Erreur création partie : " + raw);
+      return null;
+    }
+    saveSession();
+    startPolling(code);
+    return code;
+  } catch (e) {
+    alert(buildSupaNetworkHelp(e));
+    return null;
+  }
 }
  
 async function joinOnlineGame(code) {
@@ -322,6 +516,7 @@ async function joinOnlineGame(code) {
     __myIdx    = idx;
     __gameCode = code;
     __isHost   = false;
+    __draftPending = null;
  
     // S'inscrire dans joined
     const newJoined = [...(data.joined || []), idx];
@@ -351,6 +546,7 @@ function abandonSession() {
   stopPolling();
   clearSession();
   __gameCode = null; __isHost = false; __myIdx = 0; __localForm = null; __localSubmitted = false; __connectedPlayers = 0;
+  __draftPending = null;
   Object.assign(state, {
     screen: "home", mode: "multi", playerCount: 2,
     setup: [], players: [], leader: 0,
@@ -367,6 +563,7 @@ async function restoreSession(s) {
     const { data, error } = await supa.from("games").select("host_state, joined").eq("code", s.code).single();
     if (error || !data || !data.host_state) { clearSession(); render(); return; }
     __gameCode = s.code; __myIdx = s.myIdx; __isHost = s.isHost;
+    __draftPending = null;
     Object.keys(data.host_state).forEach(k => { state[k] = data.host_state[k]; });
     __myIdx = s.myIdx;
     if (!s.isHost) {
@@ -462,8 +659,9 @@ function initGame() {
     x.chosen.forEach(q => { x.questProgress[q.id] = 0; x.questPowerUses[q.effect] = 0; });
     return x;
   });
-  state.leader   = state.mode === "solo" ? 0 : Math.floor(Math.random() * state.players.length);
+  state.leader   = (state.mode === "solo" || __gameCode) ? 0 : Math.floor(Math.random() * state.players.length);
   state.rankLvl2 = [];
+  state.__draftProcessed = {};
   startTurn(true);
   state.screen = "game";
   state.log    = [];
@@ -484,6 +682,7 @@ function applyModeEvent() {
 function startTurn(first = false) {
   state.phase = "draft";
   state.draftLocked = true;
+  state.__draftProcessed = {};
   state.pool  = ["datacoin","datacoin","skill","skill","weapon","weapon","resource","resource","mystery","mystery"];
   state.draftOrder = buildOrder();
   state.draftStep  = 0;
@@ -547,10 +746,15 @@ function render() {
   } else if (state.draftLocked && state.screen === "game" && state.phase === "draft") {
     if (__gameCode) {
       const activeIdx = state.draftOrder[state.draftStep];
+      const pendingCurrentPick = !!(__draftPending
+        && activeIdx === __myIdx
+        && state.draftStep === __draftPending.step
+        && (state.__stateVersion || 0) === __draftPending.stateVersion);
       if (activeIdx !== __myIdx) {
         app.innerHTML = renderOnlineWaiting(state.players[activeIdx], "choisit son dé…");
+      } else if (pendingCurrentPick) {
+        app.innerHTML = renderOnlineWaiting(state.players[activeIdx], "valide son choix…");
       } else {
-        state.draftLocked = false;
         app.innerHTML = renderGame();
       }
     } else {
@@ -571,8 +775,6 @@ function render() {
     const el = document.querySelector(`[data-focus="${focus.key}"]`);
     if (el) { el.focus(); try { el.setSelectionRange(focus.start, focus.start); } catch (e) {} }
   }
-  // Broadcast l'état à tous après chaque action (hôte seulement)
-  if (__gameCode && __isHost && !__isSyncing) broadcastState();
 }
  
 function iconToken(icon, label, value) {
@@ -891,7 +1093,7 @@ function renderLobby() {
     const allConnected = total >= state.playerCount;
     return `<div class="wrap" style="max-width:480px;margin:0 auto;padding-top:60px">
       <div class="card">
-        <div class="chip">Partie en ligne · Hôte</div>
+        <div class="chip">Partie en ligne · Hôte · ${BUILD_TAG}</div>
         <div class="hero-title" style="font-size:42px;margin-top:16px">Code de la partie</div>
         <div style="font-family:'Bebas Neue',sans-serif;font-size:80px;letter-spacing:.12em;color:var(--gold);text-align:center;margin:20px 0">${code}</div>
         <p class="mini" style="text-align:center;line-height:1.6">Partage ce code aux autres joueurs.</p>
@@ -911,7 +1113,7 @@ function renderLobby() {
   } else {
     return `<div class="wrap" style="max-width:480px;margin:0 auto;padding-top:60px">
       <div class="card">
-        <div class="chip">Partie en ligne · Connecté · Joueur ${__myIdx + 1}</div>
+        <div class="chip">Partie en ligne · Connecté · Joueur ${__myIdx + 1} · ${BUILD_TAG}</div>
         <div class="hero-title" style="font-size:36px;margin-top:16px">En attente du lancement…</div>
         <div style="font-family:'Bebas Neue',sans-serif;font-size:80px;letter-spacing:.12em;color:var(--gold);text-align:center;margin:20px 0">${code}</div>
         <p class="mini" style="text-align:center;line-height:1.6">Tu es connecté. L'hôte va lancer la création de profils.</p>
@@ -936,7 +1138,7 @@ function renderHome() {
     ${resumeBanner}
     <div class="hero-grid">
       <div class="card">
-        <div class="chip">Murder Inside · Dossier criminel</div>
+        <div class="chip">Murder Inside · Dossier criminel · ${BUILD_TAG}</div>
         <div style="margin-top:16px" class="hero-title">Bienvenue dans<br>la matrice.</div>
         <p style="margin-top:18px" class="hero-sub">
           Un jeu de rôle criminel où chaque décision laisse une trace. Choisis ton mode et le nombre de joueurs.
@@ -1017,40 +1219,59 @@ function renderSetup() {
  
     const myReady = !!(p.name && p.name.trim() && p.chosen && p.chosen.length === 3);
     const allReady = !!state.__allReady;
+    const joinedSnapshot = Array.isArray(state.__joinedSnapshot) ? state.__joinedSnapshot : [];
+    const submittedSheets = sheetsFromJoined(joinedSnapshot);
+    const validationStatus = Array.from({ length: state.playerCount }, (_, idx) => {
+      const isValidated = idx === 0 ? __localSubmitted : !!submittedSheets[String(idx)];
+      const playerName = idx === 0
+        ? (__localForm?.name?.trim() || `Joueur ${idx + 1}`)
+        : (state.setup[idx]?.name?.trim() || `Joueur ${idx + 1}`);
+      return { idx, isValidated, playerName };
+    });
+    const hostStatusBlock = __isHost ? `<div class="card" style="margin-top:16px">
+      <div class="label-top" style="margin-bottom:10px">Validation des fiches</div>
+      <div class="soft-list">
+        ${validationStatus.map(player => `<div class="soft-item between">
+          <span>${player.idx === 0 ? "Hôte" : `Joueur ${player.idx + 1}`} · ${esc(player.playerName)}</span>
+          <strong style="color:${player.isValidated ? "var(--ok)" : "var(--muted)"}">${player.isValidated ? "Validée" : "En attente"}</strong>
+        </div>`).join("")}
+      </div>
+    </div>` : "";
 
     let bottomSection = "";
     if (!__localSubmitted) {
       if (!myReady) {
         bottomSection = `<div class="note" style="margin-top:16px;text-align:center;color:var(--muted)">
-          Remplis ton surnom et choisis 3 quêtes pour pouvoir valider ton profil.
+          Remplis ton surnom et choisis 3 quêtes pour pouvoir valider ta fiche.
         </div>`;
       } else {
         bottomSection = `<div class="row" style="margin-top:16px">
-          <button class="btn cyan" data-act="online-setup-ready" style="width:100%;font-size:16px">Valider mon profil ✓</button>
+          <button class="btn cyan" data-act="online-setup-ready" style="width:100%;font-size:16px">Validez ma fiche ✓</button>
         </div>`;
       }
     } else if (__isHost) {
       if (allReady) {
         bottomSection = `<div style="margin-top:16px">
-          <div class="note" style="text-align:center;margin-bottom:12px">✓ Tout le monde a validé son profil !</div>
-          <button class="btn cyan" data-act="online-launch-matrix" style="width:100%;font-size:18px;padding:14px">Rejoindre la matrice →</button>
+          <div class="note" style="text-align:center;margin-bottom:12px">✓ Tout le monde a validé sa fiche !</div>
+          <button class="btn cyan" data-act="online-launch-matrix" style="width:100%;font-size:18px;padding:14px">Rentrer dans la matrice →</button>
         </div>`;
       } else {
         bottomSection = `<div class="note" style="margin-top:16px;text-align:center">
-          ✓ Profil validé ! En attente des autres joueurs…
+          ✓ Fiche validée ! En attente des autres joueurs…
         </div>`;
       }
     } else {
       bottomSection = `<div class="note" style="margin-top:16px;text-align:center">
-        ✓ Profil validé ! En attente du lancement par l'hôte…
+        ✓ Fiche validée ! En attente du lancement par l'hôte…
       </div>`;
     }
     return `<div class="wrap">
       <div class="card">
         <div class="chip">Joueur ${i + 1} · ${__isHost ? "Hôte" : "Connecté"}</div>
         <h2 style="margin-top:8px">Construis ton profil criminel</h2>
-        <p class="mini">Remplis ta fiche et clique sur "Valider mon profil". L'hôte lancera la partie quand tout le monde sera prêt.</p>
+        <p class="mini">Remplis ta fiche puis clique sur "Validez ma fiche". L'hôte pourra rentrer dans la matrice quand tout le monde aura validé.</p>
       </div>
+      ${hostStatusBlock}
       <div style="margin-top:16px">${renderSetupPlayer(p, i)}</div>
       ${bottomSection}
     </div>`;
@@ -1227,6 +1448,32 @@ function renderSummaryCard(p) {
     </div>
   </div>`;
 }
+
+function renderOpponentSummaryCard(p) {
+  const totalTargets = (p.kills1 || 0) + (p.kills2 || 0);
+  return `<div class="card summary-card">
+    <div class="between">
+      <div class="label-top">Résumé adverse</div>
+      <span class="badge">${esc(p.name)}</span>
+    </div>
+    <div class="stat-strip" style="margin-top:12px">
+      ${iconToken("❤", "PV", p.hp)}
+      ${iconToken("☠", "Cibles", totalTargets)}
+      ${iconToken("⭐", "XP", p.xp)}
+    </div>
+  </div>`;
+}
+
+function renderOnlineOtherPlayersSummary() {
+  const others = state.players.filter((_, idx) => idx !== __myIdx);
+  if (!others.length) return "";
+  return `<div class="card" style="margin-top:16px">
+    <div class="label-top">Surveillance des autres joueurs</div>
+    <div class="grid" style="margin-top:12px">
+      ${others.map(p => renderOpponentSummaryCard(p)).join("")}
+    </div>
+  </div>`;
+}
  
 function renderPrivateView() {
   const p = state.players.find(x => x.id === state.privateView);
@@ -1253,8 +1500,74 @@ function renderPhaseFocus() {
   const [title, sub] = texts[state.phase] || ["Murder Inside", ""];
   return `<div class="phase-focus"><div class="phase-title">${title}</div><div class="phase-sub">${sub}</div></div>`;
 }
+
+function renderOnlineDraftTurn() {
+  const me = state.players[__myIdx];
+  if (!me) return `<div class="wrap"><div class="card"><p class="mini">Chargement…</p></div></div>`;
+
+  return `<div class="wrap ${phaseClass()}">
+    <div class="card">
+      ${renderPhaseFocus()}
+      <div class="between">
+        <div>
+          <h2>Choix des dés</h2>
+          <p class="mini">Choisis tes dés, puis attends que les autres joueurs terminent leur tour de draft.</p>
+        </div>
+        <span class="badge">Tour de ${esc(me.name)}</span>
+      </div>
+      ${renderMain()}
+    </div>
+    <div style="margin-top:16px">
+      ${renderPlayer(me, __myIdx)}
+    </div>
+  </div>`;
+}
+
+function renderOnlineGame() {
+  if (state.phase === "draft") return renderOnlineDraftTurn();
+
+  const me = state.players[__myIdx];
+  if (!me) return `<div class="wrap"><div class="card"><p class="mini">Chargement…</p></div></div>`;
+
+  return `<div class="wrap ${phaseClass()}">
+    <div class="grid g2">
+      <div class="card">
+        ${renderPhaseFocus()}
+        <div class="between">
+          <div>
+            <h2>Murder Inside</h2>
+            <p class="mini">Premier joueur : <strong style="color:#fff">${esc(state.players[state.leader]?.name || "")}</strong> · phase : ${state.phase}</p>
+          </div>
+          <span class="badge">${state.actionChoice || "aucune action"}</span>
+        </div>
+        ${renderMain()}
+        ${renderTarget()}
+      </div>
+      <div class="card">
+        <div class="note">
+          ${state.mode === "solo"
+            ? "En mode solo, un événement système se déclenche au début de chaque tour."
+            : "Résumé rapide de la partie en cours. Ta fiche complète reste affichée en dessous."}
+        </div>
+        ${state.mode === "solo" && state.systemEvent ? `
+          <div class="note" style="margin-top:12px">
+            <strong>Événement du tour</strong>
+            <div class="mini" style="margin-top:6px">${esc(state.systemEvent.name)}</div>
+            <div class="mini" style="margin-top:4px">${esc(state.systemEvent.desc)}</div>
+          </div>` : ""}
+        <div class="log" style="margin-top:12px">${state.log.map(x => `<div>${esc(x)}</div>`).join("")}</div>
+      </div>
+    </div>
+    <div style="margin-top:16px">
+      ${renderPlayer(me, __myIdx)}
+    </div>
+    ${renderOnlineOtherPlayersSummary()}
+  </div>`;
+}
  
 function renderGame() {
+  if (__gameCode) return renderOnlineGame();
+
   const isSeq = state.phase === "roll";
   const activeP = isSeq ? state.players[state.seqPlayerIdx] : null;
   const activeI = isSeq ? state.seqPlayerIdx : -1;
@@ -1305,6 +1618,7 @@ function renderGame() {
 function renderMain() {
   if (state.phase === "draft") {
     const idx = state.draftOrder[state.draftStep], p = state.players[idx];
+    const isMyTurnOnline = !__gameCode || idx === __myIdx;
     const dieIcons = { datacoin:`<img src="images/datacoin.png" style="width:28px;height:28px;object-fit:contain">`, skill:"🧠", weapon:"⚔️", resource:"📦", mystery:"❓" };
     const dieColors = {
       datacoin: "border-color:var(--gold);background:var(--gold-soft)",
@@ -1314,10 +1628,11 @@ function renderMain() {
       mystery:  "border-color:rgba(150,100,200,.4);background:rgba(150,100,200,.06)"
     };
     const alreadyPicked = p.pending.filter(d => d !== "leader");
+    const maxPicked = alreadyPicked.length >= 2;
     return `<div style="margin-top:16px">
       <div class="between">
         <strong>Choix du dé</strong>
-        <span class="badge">Au tour de ${esc(p.name)} · ${alreadyPicked.length}/${idx === state.leader ? 2 : 1} choisi${alreadyPicked.length > 1 ? "s" : ""}</span>
+        <span class="badge">Au tour de ${esc(p.name)} · ${alreadyPicked.length}/2 choisi${alreadyPicked.length > 1 ? "s" : ""}</span>
       </div>
       ${alreadyPicked.length ? `<div class="note" style="margin-top:10px">
         <span class="label-top">Dé choisi</span>
@@ -1329,7 +1644,7 @@ function renderMain() {
         ${Object.keys(DICE).filter(x => x !== "leader").map(t => {
           const count = state.pool.filter(x => x === t).length;
           const taken = alreadyPicked.includes(t);
-          const disabled = !state.pool.includes(t) || taken;
+          const disabled = !state.pool.includes(t) || taken || maxPicked || !isMyTurnOnline || !!__draftPending;
           return `<div class="card" style="${dieColors[t] || ""};opacity:${disabled ? ".45" : "1"}">
             <div class="between">
               <div style="${t === 'datacoin' ? '' : 'font-size:28px'}">${dieIcons[t] || "🎲"}</div>
@@ -1338,7 +1653,7 @@ function renderMain() {
             <div style="font-size:16px;font-weight:800;margin:8px 0 4px;font-family:'Bebas Neue',sans-serif;letter-spacing:.04em">${labelDie(t)}</div>
             <div class="mini" style="margin-bottom:12px;line-height:1.5">${DICE[t].join(" · ")}</div>
             <button class="btn ${disabled ? "outline" : "cyan"}" data-act="pick-die" data-die="${t}" ${disabled ? "disabled" : ""} style="width:100%">
-              ${taken ? "✓ Déjà pris" : count === 0 ? "Épuisé" : "Prendre ce dé"}
+              ${!isMyTurnOnline ? "En attente du tour" : __draftPending ? "Validation..." : maxPicked ? "2 dés déjà choisis" : taken ? "✓ Déjà pris" : count === 0 ? "Épuisé" : "Prendre ce dé"}
             </button>
           </div>`;
         }).join("")}
@@ -2157,26 +2472,102 @@ function seqNext(currentIdx, filter) {
 }
  
 // ── Actions ───────────────────────────────
- 
-function pickDieAction(die) {
-  if (state.phase !== "draft") return;
-  const idx = state.draftOrder[state.draftStep], p = state.players[idx];
-  if (__gameCode && idx !== __myIdx) return; // en ligne : seulement son propre tour
-  if (!state.pool.includes(die)) return;
-  const max = idx === state.leader ? 3 : 2;
+
+function applyDraftPickToState(targetState, die) {
+  if (targetState.phase !== "draft") return false;
+  const idx = targetState.draftOrder[targetState.draftStep];
+  const p = targetState.players[idx];
+  if (!p || !targetState.pool.includes(die)) return false;
+  const max = 2;
   const playerDice = p.pending.filter(d => d !== "leader");
-  if (playerDice.length >= max) return;
-  if (playerDice.includes(die)) { addLog(`${p.name} a déjà choisi un dé de type ${labelDie(die)}.`); render(); return; }
+  if (playerDice.length >= max) return false;
+  if (playerDice.includes(die)) return false;
+
   p.pending.push(die);
-  state.pool.splice(state.pool.indexOf(die), 1);
-  if (state.draftStep === state.draftOrder.length - 1) {
-    state.phase = "roll"; state.draftLocked = false;
-    state.seqPlayerIdx = state.leader; state.seqLocked = true;
-    addLog("Phase de tour — " + esc(state.players[state.leader].name) + " commence.");
+  targetState.pool.splice(targetState.pool.indexOf(die), 1);
+
+  if (targetState.draftStep === targetState.draftOrder.length - 1) {
+    targetState.phase = "roll";
+    targetState.draftLocked = false;
+    targetState.seqPlayerIdx = targetState.leader;
+    targetState.seqLocked = true;
+    targetState.log = targetState.log || [];
+    targetState.log.push("Phase de tour — " + (targetState.players[targetState.leader]?.name || "Premier joueur") + " commence.");
   } else {
-    state.draftStep++;
-    const nextIdx = state.draftOrder[state.draftStep];
-    if (nextIdx !== idx) state.draftLocked = true;
+    targetState.draftStep++;
+    targetState.draftLocked = true;
+  }
+
+  targetState.__stateVersion = (targetState.__stateVersion || 0) + 1;
+  return true;
+}
+
+async function pickDieAction(die) {
+  if (__gameCode) {
+    const { data, error } = await supa.from("games").select("host_state, joined").eq("code", __gameCode).single();
+    if (error || !data || !data.host_state) return;
+
+    const remoteState = JSON.parse(JSON.stringify(data.host_state));
+    if (remoteState.phase !== "draft") return;
+
+    const idx = remoteState.draftOrder[remoteState.draftStep];
+    if (idx !== __myIdx) return;
+
+    if (__isHost) {
+      const applied = applyDraftPickToState(remoteState, die);
+      if (!applied) return;
+
+      const { error: updateError } = await supa.from("games").update({ host_state: remoteState }).eq("code", __gameCode);
+      if (updateError) return;
+
+      Object.keys(remoteState).forEach(k => { state[k] = remoteState[k]; });
+      render();
+      return;
+    }
+
+    const optimisticState = JSON.parse(JSON.stringify(remoteState));
+    const applied = applyDraftPickToState(optimisticState, die);
+    if (!applied) return;
+
+    const joined = Array.isArray(data.joined) ? data.joined : [];
+    const cleanedJoined = clearAllDraftRequestsFromJoined(clearDraftRequestFromJoined(joined, __myIdx));
+
+    // En mode online non-hôte : l'hôte reste l'unique autorité sur host_state.
+    __draftRequestNonce++;
+    __draftPending = {
+      step: remoteState.draftStep,
+      stateVersion: remoteState.__stateVersion || 0,
+      nonce: __draftRequestNonce
+    };
+    const nextJoined = upsertJoinedEntry(cleanedJoined, __myIdx, {
+      draftRequest: {
+        type: "pick-die",
+        die,
+        nonce: __draftRequestNonce,
+        ts: Date.now(),
+        step: remoteState.draftStep,
+        stateVersion: remoteState.__stateVersion || 0
+      }
+    });
+    const { error: updateError } = await supa.from("games").update({ joined: nextJoined }).eq("code", __gameCode);
+    if (updateError) {
+      __draftPending = null;
+      return;
+    }
+    render();
+    return;
+  }
+
+  if (state.phase !== "draft") return;
+  const applied = applyDraftPickToState(state, die);
+  if (!applied) {
+    const idx = state.draftOrder[state.draftStep];
+    const p = state.players[idx];
+    if (p && p.pending.filter(d => d !== "leader").includes(die)) {
+      addLog(`${p.name} a déjà choisi un dé de type ${labelDie(die)}.`);
+    }
+    render();
+    return;
   }
   checkGameOver();
   render();
@@ -2638,6 +3029,8 @@ async function onlineSetupReadyAction() {
   if (!p) return;
   if (!p.name.trim()) { alert("Entre un surnom avant de continuer."); return; }
   if (p.chosen.length !== 3) { alert("Choisis exactement 3 quêtes avant de continuer."); return; }
+
+  __validationNonce++;
  
   const sheet = JSON.parse(JSON.stringify(p));
  
@@ -2752,6 +3145,7 @@ function setupFieldAction(i, k, v) {
   if (__gameCode && i === __myIdx) {
     // Mode en ligne : modifier __localForm (deep clone indépendant de state)
     if (!__localForm) return;
+    invalidateOnlineProfileValidation();
     __localForm[k] = v;
     if (k === "criminal") {
       const c = CRIMINALS.find(x => x.key === v);
@@ -2775,6 +3169,7 @@ function toggleQuestAction(i, qid) {
   if (__gameCode && i === __myIdx) {
     // Mode en ligne : modifier __localForm
     if (!__localForm) return;
+    invalidateOnlineProfileValidation();
     const q = __localForm.quests.find(x => x.id === qid);
     if (__localForm.chosen.some(x => x.id === qid)) {
       __localForm.chosen = __localForm.chosen.filter(x => x.id !== qid);
@@ -2921,7 +3316,7 @@ document.addEventListener("click", e => {
   if (a === "unlock-private"){ state.privateView = t.dataset.id; state.lockScreen = null; render(); }
   if (a === "close-private") { state.privateView = null; render(); }
   if (a === "cancel-lock")   { state.lockScreen = null; render(); }
-  if (a === "pick-gender")   { const gi = Number(t.dataset.idx); if (__gameCode && gi === __myIdx) { if (__localForm) { __localForm.gender = t.dataset.gender; } } else { if (state.setup[gi]) state.setup[gi].gender = t.dataset.gender; } render(); }
+  if (a === "pick-gender")   { const gi = Number(t.dataset.idx); if (__gameCode && gi === __myIdx) { if (__localForm) { invalidateOnlineProfileValidation(); __localForm.gender = t.dataset.gender; } } else { if (state.setup[gi]) state.setup[gi].gender = t.dataset.gender; } render(); }
   if (a === "online-setup-ready") onlineSetupReadyAction();
   if (a === "setup-next")    setupNextAction();
   if (a === "setup-unlock")  { state.setupLock = false; render(); }
@@ -2930,6 +3325,11 @@ document.addEventListener("click", e => {
   if (a === "resume-session") { const s = getSavedSession(); if (s) restoreSession(s); }
   if (a === "abandon-session") abandonSession();
   if (a === "go-to-setup") { state.screen = "setup"; if (!state.setup[__myIdx]) state.setup[__myIdx] = makePlayer(__myIdx); render(); }
+
+  if (__gameCode && __isHost && state.screen === "game" && !["pick-die", "show-private", "close-private", "cancel-lock"].includes(a)) {
+    state.__stateVersion = (state.__stateVersion || 0) + 1;
+    syncToCloud();
+  }
 });
  
 // ── Boot ──────────────────────────────────
