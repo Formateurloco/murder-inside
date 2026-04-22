@@ -3,7 +3,7 @@
    ══════════════════════════════════════════ */
 
 const CODE_VERSION = "20260421";
-const BUILD_TAG = "draft-fix-a1";
+const BUILD_TAG = "leader-d20-bonus-a5";
  
 // ── Data ──────────────────────────────────
  
@@ -76,7 +76,7 @@ const TARGETS = {
     { name: "LE CAÏD",     img: "caid.png",     skill: ["ruse","folie"],          threshold: 31, hits: 5, fail: 2, xp: 5, desc: "Ruse + Folie + niveau arme ≥ 31", story: "Il règne sur son territoire depuis vingt-deux ans. Dix-sept personnes ont tenté de le renverser. Personne n'est là pour le raconter. Le Caïd est patient, généreux avec les loyaux — et implacable avec les autres." },
     { name: "LE BARON",    img: "baron.png",    skill: ["discretion","folie"],    threshold: 31, hits: 5, fail: 3, xp: 5, desc: "Discrétion + Folie + niveau arme ≥ 31", story: "Aristocrate de la pègre, raffiné, cultivé, impitoyable. Le Baron collectionne les dettes de sang comme d'autres collectionnent l'art. Il attend toujours le moment parfait pour encaisser." },
     { name: "PAKHAN",      img: "pakhan.png",   skill: ["agilite","folie"],       threshold: 31, hits: 5, fail: 3, xp: 5, desc: "Agilité + Folie + niveau arme ≥ 31", story: "Pakhan a traversé trois frontières à pied avec rien dans les poches pour bâtir son empire. Aujourd'hui il dirige un réseau qui s'étend sur deux continents. On dit qu'il dort trois heures par nuit — les autres heures, il travaille." },
-    { name: "EL PATRON",   img: "el_patron.png",skill: ["violence","discretion"], threshold: 30, hits: 5, fail: 2, xp: 7, desc: "Violence + Discrétion + niveau arme ≥ 30", story: "El Patron contrôle des pans entiers de l'économie souterraine. Juges, politiques, chefs de police — tout le monde a une dette envers lui. Il n'a jamais eu besoin de tirer lui-même." },
+    { name: "EL PATRON",   img: "patron.png",   skill: ["violence","discretion"], threshold: 30, hits: 5, fail: 2, xp: 7, desc: "Violence + Discrétion + niveau arme ≥ 30", story: "El Patron contrôle des pans entiers de l'économie souterraine. Juges, politiques, chefs de police — tout le monde a une dette envers lui. Il n'a jamais eu besoin de tirer lui-même." },
     { name: "LE CHE",      img: "che.png",      skill: ["violence","ruse"],       threshold: 30, hits: 5, fail: 2, xp: 7, desc: "Violence + Ruse + niveau arme ≥ 30", story: "Le Che croit sincèrement en sa cause. Il se voit comme un révolutionnaire, pas un criminel. Cette conviction absolue le rend d'autant plus dangereux — les idéalistes n'ont pas de limite." },
     { name: "LE CERVEAU",  img: "cerveau.png",  skill: ["folie","discretion"],    threshold: 34, hits: 5, fail: 4, xp: 7, desc: "Folie + Discrétion + niveau arme ≥ 34", story: "Génie criminel avec un QI hors normes, Le Cerveau anticipe toujours quatre coups d'avance. Il a conçu des escroqueries si parfaites que ses victimes ont remercié pour l'expérience." },
     { name: "JIMMY",       img: "jimmy.png",    skill: ["folie","violence"],      threshold: 34, hits: 5, fail: 4, xp: 7, desc: "Folie + Violence + niveau arme ≥ 34", story: "Jimmy sourit tout le temps. Il est drôle, chaleureux, inoubliable. Ses victimes l'adoraient — jusqu'à la toute dernière seconde. C'est le plus dangereux de tous : nul ne le voit venir." },
@@ -228,6 +228,126 @@ async function syncSharedState() {
   }
 }
 function broadcastState() { return syncToCloud(); }
+
+function addLogToState(targetState, message) {
+  targetState.log = targetState.log || [];
+  targetState.log.unshift(message);
+  targetState.log = targetState.log.slice(0, 60);
+}
+
+function maybeAwardSkill10XpInState(targetState, p) {
+  for (const skill of Object.keys(SKILLS)) {
+    if ((p.skills[skill] || 0) >= 10 && !p.skill10Awarded[skill]) {
+      p.skill10Awarded[skill] = true;
+      targetState.skillRace[skill] = targetState.skillRace[skill] || [];
+      if (!targetState.skillRace[skill].includes(p.id)) targetState.skillRace[skill].push(p.id);
+      const rank = targetState.skillRace[skill].indexOf(p.id);
+      const gain = (SKILL_10_RANK_XP[skill] && SKILL_10_RANK_XP[skill][rank]) || 0;
+      if (gain > 0) {
+        p.xp += gain;
+        addLogToState(targetState, `${p.name} atteint 10 en ${SKILLS[skill]} : +${gain} XP (${rank + 1}${rank === 0 ? "er" : "e"} joueur).`);
+      } else {
+        addLogToState(targetState, `${p.name} atteint 10 en ${SKILLS[skill]} : 0 XP de course.`);
+      }
+    }
+  }
+}
+
+function applyNormalDieInState(targetState, p, t, face) {
+  const c = CRIMINALS.find(x => x.key === p.criminal);
+  if (t === "datacoin") p.datacoins += Number(face.replace("D", ""));
+
+  if (t === "skill") {
+    if (face === "A")  p.skills.agilite++;
+    if (face === "D")  p.skills.discretion++;
+    if (face === "F")  p.skills.folie++;
+    if (face === "V")  p.skills.violence++;
+    if (face === "R")  p.skills.ruse++;
+    if (face === "C?") p.freeSkill++;
+    maybeAwardSkill10XpInState(targetState, p);
+  }
+
+  if (t === "weapon") {
+    if (face === "Tir"   && (p.gunLevel   < 3 || (p.gunBuilt3   && p.gunLevel   < 6) || (p.gunBuilt6   && p.gunLevel   < 7))) { p.gunLevel++;   if (c.key === "psychopathe") p.ammo += 2; }
+    if (face === "Poing" && (p.meleeLevel < 3 || (p.meleeBuilt3 && p.meleeLevel < 6) || (p.meleeBuilt6 && p.meleeLevel < 7)))   p.meleeLevel++;
+    if (face === "2 Munitions") p.ammo += 2;
+    if (face === "Warning")     p.warnings++;
+  }
+
+  if (t === "resource") {
+    if (face === "1 CD")        p.cds++;
+    if (face === "1 Bobine")    p.bobines++;
+    if (face === "1 Batterie")  p.batteries++;
+    if (face === "2 CD")        p.cds += 2;
+    if (face === "2 Bobines")   p.bobines += 2;
+    if (face === "2 Batteries") p.batteries += 2;
+  }
+
+  if (t === "mystery") {
+    if (face === "Compétence au choix") p.freeSkill++;
+    if (face === "Arme au choix")       p.freeWeapon++;
+    if (face === "2 PV")   { let gain = 2; if (c.key === "missionnaire") gain += 2; p.hp = Math.min(p.maxHp, p.hp + gain); }
+    if (face === "1 Warning")    p.warnings++;
+    if (face === "2 Munitions")  p.ammo += 2;
+    if (face === "Ressource au choix") p.choiceRes++;
+  }
+}
+
+function applyLeaderInState(targetState, face, choice) {
+  targetState.players.forEach(p => {
+    const c = CRIMINALS.find(x => x.key === p.criminal);
+    if      (face === "Double réussite")                          p.doubleHit = true;
+    else if (face === "+3 à tous les d20")                        p.turnPlus3All = true;
+    else if (face === "2 PV (tous)")                              { let gain = 2; if (c.key === "missionnaire") gain += 2; p.hp = Math.min(p.maxHp, p.hp + gain); }
+    else if (face === "1 compétence au choix (tous)" && choice)   { p.skills[choice]++; maybeAwardSkill10XpInState(targetState, p); }
+    else if (face === "1 arme/compétence au choix (tous)" && choice) {
+      if      (choice === "gun"   && p.gunLevel < 7) p.gunLevel++;
+      else if (choice === "melee" && p.meleeLevel < 7) p.meleeLevel++;
+      else if (SKILLS[choice]) { p.skills[choice]++; maybeAwardSkill10XpInState(targetState, p); }
+    }
+    else if (face === "Ressource au choix (tous)" && choice) {
+      if (choice === "cds")       p.cds++;
+      if (choice === "bobines")   p.bobines++;
+      if (choice === "batteries") p.batteries++;
+    }
+  });
+  addLogToState(targetState, `Effet du dé premier joueur : ${face}${choice ? ` · ${choice}` : ""}.`);
+}
+
+async function updateOnlineHostState(mutator) {
+  if (!__gameCode) return false;
+  try {
+    for (let attempt = 0; attempt < 4; attempt++) {
+      const { data, error } = await supa.from("games").select("host_state").eq("code", __gameCode).single();
+      if (error || !data || !data.host_state) return false;
+
+      const nextState = JSON.parse(JSON.stringify(data.host_state));
+      const baseVersion = Number(nextState.__stateVersion || 0);
+      const changed = mutator(nextState);
+      if (!changed) return false;
+
+      nextState.__stateVersion = baseVersion + 1;
+      const { data: updatedRows, error: updateError } = await supa.from("games")
+        .update({ host_state: nextState })
+        .eq("code", __gameCode)
+        .eq("host_state->>__stateVersion", String(baseVersion))
+        .select("code");
+
+      if (updateError) return false;
+      if (!updatedRows || !updatedRows.length) continue;
+
+      const localForm = __localForm;
+      Object.keys(nextState).forEach(k => { state[k] = nextState[k]; });
+      __localForm = localForm;
+      render();
+      return true;
+    }
+    return false;
+  } catch (e) {
+    console.error("[updateOnlineHostState]", e);
+    return false;
+  }
+}
  
 function getOnlineSheetsStatus(joined, expectedCount = state.playerCount) {
   const sheets = sheetsFromJoined(joined);
@@ -383,12 +503,9 @@ function startPolling(code) {
       }
  
       if (__isHost) {
-        if (data.host_state && (data.host_state.__stateVersion || 0) > (state.__stateVersion || 0)) {
-          Object.keys(data.host_state).forEach(k => { state[k] = data.host_state[k]; });
-          render();
-          return;
-        }
-
+        // L'hôte reste la source de vérité locale pour `state`.
+        // On ne réhydrate plus `host_state` depuis Supabase ici, pour éviter
+        // qu'un ancien snapshot distant réécrase un choix déjà validé localement.
         if (state.screen === "game" && state.phase === "draft" && autoAdvanceDraftIfBlocked(state)) {
           await supa.from("games").update({ host_state: JSON.parse(JSON.stringify(state)) }).eq("code", code);
           render();
@@ -625,7 +742,7 @@ function makePlayer(i) {
     gunBuilt3:   false, gunBuilt6:   false,
     meleeLevel: 0, gunLevel: 0,
     pending: [], rolled: [], done: false, rollPanel: null,
-    plus3: false, doubleHit: false,
+    plus3: false, turnPlus3All: false, doubleHit: false,
     questProgress: {}, questReady: [], questPowerUses: {}, abandonedQuests: [],
     targetOptions: [], chosenTarget: null,
     targetHits: 0, finishedTarget: false, finishedQuestsThisTurn: false,
@@ -717,7 +834,7 @@ function startTurn(first = false) {
   state.players.forEach((p, i) => {
     p.pending  = i === state.leader ? ["leader"] : [];
     p.rolled   = []; p.done = false; p.rollPanel = null;
-    p.plus3    = false; p.doubleHit = false;
+    p.plus3    = false; p.turnPlus3All = false; p.doubleHit = false;
     p.finishedTarget = false; p.finishedQuestsThisTurn = false;
     p.abandonedQuests = []; p.targetHits = 0;
     p.committedQuestId = null;
@@ -750,6 +867,12 @@ function checkGameOver() {
  
 function effectiveXp(p) { return p.xp - p.warnings * 2; }
 function nextTurn() { state.leader = (state.leader + 1) % state.players.length; startTurn(); render(); }
+function actionIsComplete(p) {
+  if (!p || state.phase !== "action") return false;
+  if (state.actionChoice === "target") return !!(p.finishedTarget || p.abandonedThisTurn);
+  if (state.actionChoice === "quest") return !!(p.finishedQuestsThisTurn || p.abandonedQuestThisTurn);
+  return false;
+}
  
 // ── Rendering ─────────────────────────────
  
@@ -757,7 +880,8 @@ function render() {
   const app = document.getElementById("app");
   const ae  = document.activeElement;
   const focus = ae && ae.getAttribute ? { key: ae.getAttribute("data-focus"), start: ae.selectionStart || 0 } : null;
-  const inSeqPhase = state.screen === "game" && state.phase === "roll";
+  const inSeqPhase = state.screen === "game"
+    && (state.phase === "roll" || (!__gameCode && state.mode === "multi" && state.phase === "action"));
   if (state.screen === "lobby") {
     app.innerHTML = renderLobby();
   } else if (state.lockScreen) {
@@ -1380,10 +1504,12 @@ function renderSeqLock() {
   if (!p) return renderGame();
   const isLeader = state.players.indexOf(p) === state.leader;
   const icon  = "🎲";
-  const label = "Ton tour";
-  const hint  = isLeader
-    ? "Lance tes dés, gère tes achats, puis choisis l'action du tour (cible ou quête)."
-    : `Lance tes dés et gère tes achats. L'action du tour est déjà choisie par ${esc(state.players[state.leader]?.name || "le premier joueur")}.`;
+  const label = state.phase === "action" ? "Phase d'action" : "Ton tour";
+  const hint  = state.phase === "action"
+    ? `Passe l'appareil à ${esc(p.name)} pour résoudre ${state.actionChoice === "target" ? "sa cible" : state.actionChoice === "quest" ? "sa quête" : "son action"}.`
+    : (isLeader
+      ? "Lance tes dés, gère tes achats, puis choisis l'action du tour (cible ou quête)."
+      : `Lance tes dés et gère tes achats. L'action du tour est déjà choisie par ${esc(state.players[state.leader]?.name || "le premier joueur")}.`);
   return `<div class="lock-screen">
     <div class="lock-content">
       <div class="lock-icon">${icon}</div>
@@ -1495,6 +1621,17 @@ function renderOnlineOtherPlayersSummary() {
     </div>
   </div>`;
 }
+
+function renderLocalOtherPlayersSummary(activeIdx) {
+  const others = state.players.filter((_, idx) => idx !== activeIdx);
+  if (!others.length) return "";
+  return `<div class="card" style="margin-top:16px">
+    <div class="label-top">Résumé des autres joueurs</div>
+    <div class="grid" style="margin-top:12px">
+      ${others.map(p => renderOpponentSummaryCard(p)).join("")}
+    </div>
+  </div>`;
+}
  
 function renderPrivateView() {
   const p = state.players.find(x => x.id === state.privateView);
@@ -1589,9 +1726,13 @@ function renderOnlineGame() {
 function renderGame() {
   if (__gameCode) return renderOnlineGame();
 
+  const isDraftSeq = state.phase === "draft";
   const isSeq = state.phase === "roll";
-  const activeP = isSeq ? state.players[state.seqPlayerIdx] : null;
-  const activeI = isSeq ? state.seqPlayerIdx : -1;
+  const isActionSeq = state.mode === "multi" && state.phase === "action";
+  const activeIdx = isDraftSeq
+    ? state.draftOrder[state.draftStep]
+    : (isSeq || isActionSeq) ? state.seqPlayerIdx : -1;
+  const activeP = activeIdx >= 0 ? state.players[activeIdx] : null;
  
   return `<div class="wrap ${phaseClass()}">
     <div class="grid g2">
@@ -1627,12 +1768,15 @@ function renderGame() {
       </div>
     </div>
     <div style="margin-top:16px">
-      ${__gameCode && state.phase !== "draft"
-        ? renderPlayer(state.players[__myIdx], __myIdx)
+      ${isDraftSeq && activeP
+        ? renderPlayer(activeP, activeIdx)
         : isSeq && activeP
-          ? renderPlayer(activeP, activeI)
+        ? renderPlayer(activeP, activeIdx)
+        : isActionSeq && activeP
+          ? renderPlayer(activeP, activeIdx)
           : `<div class="grid g2">${state.players.map((p, i) => renderPlayer(p, i)).join("")}</div>`}
     </div>
+    ${(isDraftSeq || isActionSeq) ? renderLocalOtherPlayersSummary(activeIdx) : ""}
   </div>`;
 }
  
@@ -1812,6 +1956,7 @@ function renderPlayer(p, i) {
     ${renderRollButton(p)}
     ${renderRolled(p)}
     ${renderTargetTop(p)}
+    ${renderQuestTop(p)}
     ${renderActionPanel(p)}
     <div class="between" style="margin-top:14px">
       <div class="row" style="gap:12px;align-items:flex-start">
@@ -1935,31 +2080,25 @@ function renderRolled(p) {
  
 function renderTargetTop(p) {
   if (state.phase !== "action" || state.actionChoice !== "target") return "";
-  if (p.rollPanel && (p.rollPanel.kind === "chooseTargetOptions" || p.rollPanel.kind === "chooseTarget")) {
-    return renderRollPanel(p);
-  }
-  if (!p.chosenTarget && !p.finishedTarget && !p.abandonedThisTurn) {
-    return `<div class="card section-card" style="margin-top:12px">
-      <div class="label-top">Ta cible</div>
-      <div class="mini" style="margin-top:8px">Clique sur "Attaquer la cible" pour choisir parmi tes 2 options.</div>
-    </div>`;
-  }
-  if (p.chosenTarget && !p.finishedTarget && !p.abandonedThisTurn) {
-    const t = p.chosenTarget;
-    return `<div class="card target-frame" style="margin-top:12px;display:flex;gap:14px;align-items:flex-start">
-      ${t.img ? `<img src="targets/${t.img}" alt="${esc(t.name)}" style="width:90px;flex-shrink:0;border-radius:6px;border:1px solid rgba(185,47,69,.32)">` : ""}
-      <div style="flex:1;min-width:0">
-        <div class="label-top">Cible désignée${state.mode === "solo" && state.soloEnemyAi ? ` · IA : ${esc(state.soloEnemyAi.name)}` : ""}</div>
-        <div style="font-family:'Bebas Neue',sans-serif;font-size:22px;margin-top:4px">${esc(t.name)}</div>
-        ${t.story ? `<div class="target-story" style="margin-top:6px;font-size:11px;line-height:1.6;color:var(--muted)">${esc(t.story)}</div>` : ""}
-        <div class="mini" style="margin-top:8px;padding-top:6px;border-top:1px solid var(--line)">
-          Progression : <strong>${p.targetHits}/${t.hits}</strong> touches · ${t.skill.map(k => SKILLS[k]).join(" + ")} ≥ ${t.threshold}
-        </div>
-        ${state.mode === "solo" && state.soloEnemyAi ? `<div class="mini warn" style="margin-top:4px">${esc(state.soloEnemyAi.desc)}</div>` : ""}
-      </div>
-    </div>`;
-  }
+  // Toute l'interface cible vit désormais dans "Action personnelle".
+  // On neutralise ce bloc haut de fiche pour éviter tout doublon local/en ligne.
   return "";
+}
+
+function renderQuestTop(p) {
+  if (state.phase !== "action" || state.actionChoice !== "quest") return "";
+  if (!p.committedQuestId || p.finishedQuestsThisTurn || p.abandonedQuestThisTurn) return "";
+  const q = p.chosen.find(x => x.id === p.committedQuestId);
+  if (!q) return "";
+  return `<div class="card quest-frame" style="margin-top:12px">
+    <div class="label-top">Contrat en cours</div>
+    <div style="font-family:'Bebas Neue',sans-serif;font-size:22px;margin-top:4px">${esc(q.name)}</div>
+    ${q.story ? `<div class="target-story" style="margin-top:8px;font-size:11px;line-height:1.6;color:var(--muted)">${esc(q.story)}</div>` : ""}
+    <div class="mini" style="margin-top:8px;padding-top:6px;border-top:1px solid var(--line)">
+      Progression : <strong>${p.questProgress[q.id] || 0}/${q.hits}</strong> réussites · ${SKILLS[q.skill]} + d20 + arme ≥ ${q.threshold}
+    </div>
+    <div class="mini" style="margin-top:4px">Échec : ${q.failType === "hp" ? "-" + q.failAmount + " PV" : "+" + q.failAmount + " Warning"}</div>
+  </div>`;
 }
  
 function renderPurchasePanel(p) {
@@ -2146,6 +2285,9 @@ function renderActionPanel(p) {
       ? (x.finishedTarget || x.abandonedThisTurn)
       : (x.finishedQuestsThisTurn || x.abandonedQuestThisTurn)
   );
+  const nextPlayerBtn = (!__gameCode && state.mode === "multi" && actionIsComplete(p) && !allDoneAction && !p.rollPanel)
+    ? `<div style="margin-top:14px"><button class="btn green" data-act="next-action-player">Passer au joueur suivant →</button></div>`
+    : "";
   const nextTurnBtn = (allDoneAction && !p.rollPanel)
     ? `<div style="margin-top:14px"><button class="btn green" data-act="next-turn">Passer au tour suivant →</button></div>`
     : "";
@@ -2157,6 +2299,7 @@ function renderActionPanel(p) {
       ${state.actionChoice === "target" ? targetControls : questControls}
     </div>` : ""}
     ${info}
+    ${nextPlayerBtn}
     ${nextTurnBtn}
     ${renderPowerPanel(p)}
     ${renderRollPanel(p)}
@@ -2218,8 +2361,9 @@ function renderRollPanel(p) {
     return `<div class="note" style="margin-top:12px">
       <div class="label-top">${isTarget ? "Engagement · Cible" : "Exécution · Contrat"}</div>
       <strong style="font-family:'Bebas Neue',sans-serif;font-size:20px;display:block;margin-top:6px">${esc(obj.name)}</strong>
-      ${obj.story ? `<div class="target-story" style="margin-top:8px;font-size:12px;line-height:1.65;color:var(--muted)">${esc(obj.story)}</div>` : ""}
-      <div style="margin-top:12px;padding-top:10px;border-top:1px solid var(--line)">
+      ${isTarget && obj.img ? `<img src="targets/${obj.img}" alt="${esc(obj.name)}" style="width:100%;max-width:220px;aspect-ratio:2/3;object-fit:cover;object-position:top;border-radius:6px;border:1px solid rgba(185,47,69,.32);margin-top:12px">` : ""}
+      ${obj.story ? `<div class="target-story" style="margin-top:8px;font-size:11px;line-height:1.6;color:var(--muted)">${esc(obj.story)}</div>` : ""}
+      <div style="margin-top:12px;${isTarget ? "" : "padding-top:10px;border-top:1px solid var(--line)"}">
         <div class="mini">${skillLabel} + d20 + bonus d'arme ≥ ${obj.threshold}</div>
         ${!isTarget ? `<div class="mini" style="margin-top:4px">Échec : ${obj.failType === "hp" ? "-" + obj.failAmount + " PV" : "+" + obj.failAmount + " Warning"}</div>` : ""}
       </div>
@@ -2257,6 +2401,10 @@ function renderRollPanel(p) {
     if (allDone) {
       afterBtns += `<div style="margin-top:14px">
         <button class="btn green" data-act="next-turn">Passer au tour suivant →</button>
+      </div>`;
+    } else if (!__gameCode && state.mode === "multi" && actionIsComplete(p)) {
+      afterBtns += `<div style="margin-top:14px">
+        <button class="btn green" data-act="next-action-player">Passer au joueur suivant →</button>
       </div>`;
     }
     const flavorSuccess = [
@@ -2462,7 +2610,7 @@ function applyLeader(face, choice) {
   state.players.forEach(p => {
     const c = CRIMINALS.find(x => x.key === p.criminal);
     if      (face === "Double réussite")                          p.doubleHit = true;
-    else if (face === "+3 à tous les d20")                        p.plus3     = true;
+    else if (face === "+3 à tous les d20")                        p.turnPlus3All = true;
     else if (face === "2 PV (tous)")                              { let gain = 2; if (c.key === "missionnaire") gain += 2; p.hp = Math.min(p.maxHp, p.hp + gain); }
     else if (face === "1 compétence au choix (tous)" && choice)   { p.skills[choice]++; maybeAwardSkill10Xp(p); }
     else if (face === "1 arme/compétence au choix (tous)" && choice) {
@@ -2594,10 +2742,37 @@ async function pickDieAction(die) {
   render();
 }
  
-function rollDiceAction(id) {
+async function rollDiceAction(id) {
+  if (__gameCode) {
+    await updateOnlineHostState(nextState => {
+      const p = nextState.players.find(x => x.id === id);
+      if (!p || !p.pending.length) return false;
+      if (nextState.players[__myIdx]?.id !== id) return false;
+
+      p.rolled = [];
+      let leaderFaceNeedingChoice = null;
+      for (const t of p.pending) {
+        const face = pick(DICE[t]);
+        p.rolled.push({ type: t, face });
+        if (t === "leader" && ["1 compétence au choix (tous)","1 arme/compétence au choix (tous)","Ressource au choix (tous)"].includes(face)) {
+          leaderFaceNeedingChoice = face;
+        } else if (t === "leader") {
+          applyLeaderInState(nextState, face, null);
+        } else {
+          applyNormalDieInState(nextState, p, t, face);
+        }
+      }
+      p.pending = [];
+      if (id === nextState.players[nextState.leader]?.id && leaderFaceNeedingChoice) {
+        p.rollPanel = { kind: "leaderChoice", face: leaderFaceNeedingChoice };
+      }
+      return true;
+    });
+    return;
+  }
+
   const p = state.players.find(x => x.id === id);
   if (!p || !p.pending.length) return;
-  if (__gameCode && state.players[__myIdx]?.id !== id) return; // en ligne : seulement ses propres dés
   p.rolled = [];
   let leaderFaceNeedingChoice = null;
   for (const t of p.pending) {
@@ -2617,23 +2792,59 @@ function rollDiceAction(id) {
   }
   // Le joueur reste sur son écran pour faire ses achats — pas d'avancée ici
   render();
-  if (__gameCode) syncSharedState();
 }
  
-function resolveLeaderAction(choice) {
+async function resolveLeaderAction(choice) {
+  if (__gameCode) {
+    await updateOnlineHostState(nextState => {
+      const p = nextState.players[nextState.leader];
+      if (!p || !p.rollPanel || p.rollPanel.kind !== "leaderChoice") return false;
+      applyLeaderInState(nextState, p.rollPanel.face, choice);
+      p.rollPanel = null;
+      return true;
+    });
+    return;
+  }
+
   const p = state.players[state.leader];
   if (!p || !p.rollPanel || p.rollPanel.kind !== "leaderChoice") return;
   applyLeader(p.rollPanel.face, choice);
   p.rollPanel = null;
   // Le leader reste sur son écran pour faire ses achats et choisir l'action
   render();
-  if (__gameCode) syncSharedState();
 }
  
-function buyAction(id, kind, res) {
+async function buyAction(id, kind, res) {
+  if (__gameCode) {
+    await updateOnlineHostState(nextState => {
+      const p = nextState.players.find(x => x.id === id);
+      if (!p) return false;
+      if (nextState.players[__myIdx]?.id !== id) return false;
+
+      const before = JSON.stringify(p);
+      if (kind === "pv"   && p.datacoins >= 2) { p.datacoins -= 2; p.hp = Math.min(p.maxHp, p.hp + 1); }
+      if (kind === "ammo" && p.datacoins >= 1) { p.datacoins -= 1; p.ammo += 1; }
+      if (kind === "res"  && p.datacoins >= 3) { p.datacoins -= 3; p[res] += 1; }
+
+      if (kind === "buildM3" && p.meleeLevel >= 3 && !p.meleeBuilt3 && p.batteries >= 1 && p.bobines >= 2 && p.cds >= 1) {
+        p.batteries -= 1; p.bobines -= 2; p.cds -= 1; p.meleeBuilt3 = true;
+      }
+      if (kind === "buildM6" && p.meleeLevel >= 6 && p.meleeBuilt3 && !p.meleeBuilt6 && p.batteries >= 2 && p.bobines >= 1 && p.cds >= 2) {
+        p.batteries -= 2; p.bobines -= 1; p.cds -= 2; p.meleeBuilt6 = true;
+      }
+      if (kind === "buildG3" && p.gunLevel >= 3 && !p.gunBuilt3 && p.batteries >= 1 && p.bobines >= 2 && p.cds >= 3) {
+        p.batteries -= 1; p.bobines -= 2; p.cds -= 3; p.gunBuilt3 = true;
+      }
+      if (kind === "buildG6" && p.gunLevel >= 6 && p.gunBuilt3 && !p.gunBuilt6 && p.batteries >= 2 && p.bobines >= 3 && p.cds >= 2) {
+        p.batteries -= 2; p.bobines -= 3; p.cds -= 2; p.gunBuilt6 = true;
+      }
+      return JSON.stringify(p) !== before;
+    });
+    return;
+  }
+
   const p = state.players.find(x => x.id === id);
   if (!p) return;
-  if (__gameCode && state.players[__myIdx]?.id !== id) return; // en ligne : seulement ses propres achats
  
   if (kind === "pv"   && p.datacoins >= 2) { p.datacoins -= 2; p.hp = Math.min(p.maxHp, p.hp + 1); }
   if (kind === "ammo" && p.datacoins >= 1) { p.datacoins -= 1; p.ammo += 1; }
@@ -2654,10 +2865,23 @@ function buyAction(id, kind, res) {
  
   checkGameOver();
   render();
-  if (__gameCode) syncSharedState();
 }
  
-function chooseResAction(id, res) {
+async function chooseResAction(id, res) {
+  if (__gameCode) {
+    await updateOnlineHostState(nextState => {
+      const p = nextState.players.find(x => x.id === id);
+      if (!p || p.choiceRes < 1) return false;
+      if (nextState.players[__myIdx]?.id !== id) return false;
+      p.choiceRes--;
+      if (res === "cds")      p.cds++;
+      if (res === "bobines")  p.bobines++;
+      if (res === "batteries")p.batteries++;
+      return true;
+    });
+    return;
+  }
+
   const p = state.players.find(x => x.id === id);
   if (!p || p.choiceRes < 1) return;
   p.choiceRes--;
@@ -2665,7 +2889,6 @@ function chooseResAction(id, res) {
   if (res === "bobines")  p.bobines++;
   if (res === "batteries")p.batteries++;
   render();
-  if (__gameCode) syncSharedState();
 }
  
 // ── Duel actions ──────────────────────────
@@ -2755,7 +2978,8 @@ function duelRollAction() {
     const skill = attacker.skills[d.attackerSkill] || 0;
     const weapon = d.attackerWeapon === "gun" ? d.attackerGunBonus : attacker.meleeLevel;
     const roll = Math.floor(Math.random() * 20) + 1;
-    const total = roll + skill + weapon;
+    const allTurnPlus3 = attacker.turnPlus3All ? 3 : 0;
+    const total = roll + skill + weapon + allTurnPlus3;
     // Find or create current round entry
     if (!d.rounds.length || d.rounds[d.rounds.length - 1].defenderRoll !== undefined) {
       d.rounds.push({ attackerRoll: roll, attackerTotal: total });
@@ -2765,17 +2989,18 @@ function duelRollAction() {
       d.rounds[d.rounds.length - 1].attackerTotal = total;
     }
     d.attackerTurn = false; // now defender's turn
-    addLog(`Duel — ${attacker.name} lance ${roll} + ${skill} + ${weapon} = ${total}`);
+    addLog(`Duel — ${attacker.name} lance ${roll} + ${skill} + ${weapon}${allTurnPlus3 ? " + 3" : ""} = ${total}`);
   } else {
     // Defender rolls
     const skill  = defender.skills[d.defenderSkill] || 0;
     const weapon = d.defenderWeapon === "gun" ? d.defenderGunBonus : defender.meleeLevel;
     const roll   = Math.floor(Math.random() * 20) + 1;
-    const total  = roll + skill + weapon;
+    const allTurnPlus3 = defender.turnPlus3All ? 3 : 0;
+    const total  = roll + skill + weapon + allTurnPlus3;
     const cur = d.rounds[d.rounds.length - 1];
     cur.defenderRoll  = roll;
     cur.defenderTotal = total;
-    addLog(`Duel — ${defender.name} lance ${roll} + ${skill} + ${weapon} = ${total}`);
+    addLog(`Duel — ${defender.name} lance ${roll} + ${skill} + ${weapon}${allTurnPlus3 ? " + 3" : ""} = ${total}`);
  
     // Resolve round
     if (cur.attackerTotal > cur.defenderTotal) {
@@ -2812,7 +3037,29 @@ function duelRollAction() {
   render();
 }
  
-function donePurchaseAction(id) {
+async function donePurchaseAction(id) {
+  if (__gameCode) {
+    await updateOnlineHostState(nextState => {
+      const p = nextState.players.find(x => x.id === id);
+      if (!p || p.done) return false;
+      if (nextState.players[__myIdx]?.id !== id) return false;
+      const isLeader = nextState.players.indexOf(p) === nextState.leader;
+      if (!p.rolled.length) return false;
+      if (isLeader && !nextState.actionChoice) return false;
+
+      p.done = true;
+      addLogToState(nextState, `${p.name} a terminé son tour.`);
+      if (nextState.players.every(x => x.done)) {
+        nextState.phase = "action";
+        nextState.seqLocked = false;
+        const actionLabel = { target: "Attaque des cibles.", quest: "Quêtes.", duel: "Affaiblir un joueur." }[nextState.actionChoice] || "Action.";
+        addLogToState(nextState, "Phase d'action — " + actionLabel);
+      }
+      return true;
+    });
+    return;
+  }
+
   const p = state.players.find(x => x.id === id);
   if (!p || p.done) return;
   if (__gameCode && state.players[__myIdx]?.id !== id) return; // en ligne : seulement soi-même
@@ -2823,7 +3070,8 @@ function donePurchaseAction(id) {
   addLog(`${p.name} a terminé son tour.`);
   if (state.players.every(x => x.done)) {
     state.phase = "action";
-    state.seqLocked = false;
+    state.seqPlayerIdx = state.leader;
+    state.seqLocked = state.mode === "multi" && state.players.length > 1;
     const actionLabel = { target: "Attaque des cibles.", quest: "Quêtes.", duel: "Affaiblir un joueur." }[state.actionChoice] || "Action.";
     addLog("Phase d'action — " + actionLabel);
   } else {
@@ -2834,10 +3082,49 @@ function donePurchaseAction(id) {
     }
   }
   render();
-  if (__gameCode) syncSharedState();
+}
+
+function nextActionPlayerAction() {
+  if (__gameCode || state.phase !== "action") return;
+  const next = seqNext(state.seqPlayerIdx, pl => !actionIsComplete(pl));
+  if (next === null) return;
+  state.seqPlayerIdx = next;
+  state.seqLocked = true;
+  render();
 }
  
-function chooseActionAction(kind) {
+async function chooseActionAction(kind) {
+  if (__gameCode) {
+    await updateOnlineHostState(nextState => {
+      if (nextState.actionChoice) return false;
+      if (__myIdx !== nextState.leader) return false;
+      nextState.actionChoice = kind;
+      if (kind === "target") {
+        nextState.players.forEach(p => {
+          const tier = stage(p);
+          const pool = [...TARGETS[tier]];
+          const i1 = Math.floor(Math.random() * pool.length);
+          const t1 = pool.splice(i1, 1)[0];
+          const t2 = pool[Math.floor(Math.random() * pool.length)];
+          p.targetOptions = [t1, t2];
+          p.chosenTarget = null;
+        });
+        if (nextState.mode === "solo") {
+          nextState.soloEnemyAi = pick(SOLO_ENEMY_AI);
+          nextState.soloEnemyThresholdBonus = 0;
+          nextState.soloEnemyShieldFresh = nextState.soloEnemyAi && nextState.soloEnemyAi.key === "first_hit_shield";
+          addLogToState(nextState, `Phase cible solo — IA ennemie : ${nextState.soloEnemyAi.name}. Choisis ta cible.`);
+        } else {
+          addLogToState(nextState, "Chaque joueur choisit sa cible parmi 2 options.");
+        }
+      }
+      const labels = { target: "attaquer la cible", quest: "faire les quêtes", duel: "affaiblir un joueur" };
+      addLogToState(nextState, `Choix verrouillé : ${labels[kind] || kind}.`);
+      return true;
+    });
+    return;
+  }
+
   if (state.actionChoice) return;
   if (__gameCode && __myIdx !== state.leader) return; // en ligne : seulement le leader choisit
   state.actionChoice = kind;
@@ -2863,7 +3150,6 @@ function chooseActionAction(kind) {
   const labels = { target: "attaquer la cible", quest: "faire les quêtes", duel: "affaiblir un joueur" };
   addLog(`Choix verrouillé : ${labels[kind] || kind}.`);
   render();
-  if (__gameCode) syncSharedState();
 }
  
 function openActionAction(id, kind) {
@@ -2928,7 +3214,7 @@ function submitActionAction(id, kind, weapon, ammo) {
     weaponBonus = p.gunLevel + spend;
   }
  
-  const modPlus3       = p.plus3        ? 3 : 0;
+  const modPlus3       = (p.plus3 ? 3 : 0) + (p.turnPlus3All ? 3 : 0);
   const modMinus3      = p.powerMinus3  ? 3 : 0;
   const modSystemPlus2 = p.systemPlus2  ? 2 : 0;
   const modSystemMinus2= p.systemMinus2 ? 2 : 0;
@@ -3345,6 +3631,7 @@ document.addEventListener("click", e => {
   if (a === "duel-roll")     duelRollAction();
   if (a === "end-turn")      { if (!__gameCode || __myIdx === state.leader) nextTurn(); }
   if (a === "next-turn")     nextTurn();
+  if (a === "next-action-player") nextActionPlayerAction();
   if (a === "pick-target")   pickTargetAction(t.dataset.id, Number(t.dataset.idx));
   if (a === "show-private")  { state.lockScreen = t.dataset.id; state.privateView = null; render(); }
   if (a === "unlock-private"){ state.privateView = t.dataset.id; state.lockScreen = null; render(); }
@@ -3360,12 +3647,9 @@ document.addEventListener("click", e => {
   if (a === "abandon-session") abandonSession();
   if (a === "go-to-setup") { state.screen = "setup"; if (!state.setup[__myIdx]) state.setup[__myIdx] = makePlayer(__myIdx); render(); }
 
-  if (__gameCode && __isHost && state.screen === "game" && !["pick-die", "show-private", "close-private", "cancel-lock"].includes(a)) {
-    state.__stateVersion = (state.__stateVersion || 0) + 1;
-    syncToCloud();
-  }
 });
  
 // ── Boot ──────────────────────────────────
 initSetup();
 render();
+
